@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>가락시장 사입 도우미</title>
+<style>
+  :root{
+    --bg:#0b1220; --surface:#121b2e; --surface-2:#1a2540; --line:#25324f;
+    --ink:#eef2ff; --sub:#93a2c2; --accent:#4f8cff; --accent-ink:#08122b; --danger:#ff6b6b;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  body{ padding-bottom:24px; }
+  h1{ font-size:18px; text-align:center; padding:14px 10px 10px; margin:0; }
+  .wrap{ max-width:640px; margin:0 auto; padding:0 12px; }
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--ink); border-radius:12px; padding:12px 14px; font-size:15px; font-weight:700;
+    cursor:pointer; }
+  .btn.accent{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .btn.danger{ background:transparent; color:var(--danger); border-color:var(--danger); }
+  .btn.block{ width:100%; }
+  .btn.sm{ padding:8px 10px; font-size:13px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  input[type=text]{ width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink);
+    border-radius:10px; padding:11px 12px; font-size:15px; }
+  .vendor-item{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:12px; padding:10px 10px; margin-bottom:8px; }
+  .vendor-item .name{ flex:1; font-weight:700; font-size:15px; }
+  .vendor-item .status{ font-size:12px; color:var(--sub); }
+  .vendor-item.done{ border-color:var(--accent); }
+  .vendor-item.done .status{ color:var(--accent); }
+  .order-arrows{ display:flex; flex-direction:column; gap:2px; }
+  .order-arrows button{ background:none; border:none; color:var(--sub); font-size:14px; cursor:pointer; padding:2px 4px; }
+  .hidden{ display:none !important; }
+  .empty{ color:var(--sub); font-size:14px; text-align:center; padding:16px 0; }
+  #cropStage{ position:relative; width:100%; touch-action:none; border-radius:12px; overflow:hidden;
+    background:#000; margin-top:10px; }
+  #cropStage img{ display:block; width:100%; height:auto; user-select:none; -webkit-user-drag:none; }
+  #cropBox{ position:absolute; border:2px solid var(--accent); background:rgba(79,140,255,0.18); display:none; }
+  .viewer{ position:fixed; inset:0; background:#000; z-index:50; display:flex; flex-direction:column; }
+  .viewer-top{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
+    background:#0b1220; border-bottom:1px solid var(--line); }
+  .viewer-top .vname{ font-size:17px; font-weight:800; }
+  .viewer-top .idx{ font-size:12px; color:var(--sub); }
+  .viewer-body{ flex:1; overflow:auto; display:flex; align-items:flex-start; justify-content:center; background:#000; }
+  .viewer-body img{ width:100%; height:auto; display:block; }
+  .viewer-nav{ display:flex; gap:10px; padding:10px 12px; background:#0b1220; border-top:1px solid var(--line); }
+  .viewer-nav .btn{ flex:1; font-size:20px; padding:14px; }
+  .step-title{ font-size:13px; color:var(--sub); font-weight:700; margin-bottom:8px; }
+  .top-actions{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+  #toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#1a2540;
+    border:1px solid var(--accent); color:var(--ink); padding:12px 16px; border-radius:12px; font-size:14px;
+    max-width:86%; text-align:center; z-index:100; opacity:0; pointer-events:none; transition:opacity .2s; }
+  #toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🥬 가락시장 사입 도우미</h1>
+
+  <div class="card" id="uploadCard">
+    <div class="step-title">1. 오늘 받은 사입 목록 사진</div>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+    <div id="imgTabs" class="row" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card hidden" id="cropCard">
+    <div class="step-title">2. 거래처 자리 표시하기 (사진 위에서 손가락으로 네모 그리기)</div>
+    <div id="cropStage">
+      <img id="cropImg">
+      <div id="cropBox"></div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn sm" id="cropCancelBtn">취소</button>
+      <button class="btn accent sm" id="cropSaveBtn">이 자리로 저장</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" id="addVendorRow" style="margin-bottom:10px;">
+      <input type="text" id="addVendorInput" placeholder="새 거래처 이름" style="flex:1;">
+      <button class="btn accent sm" id="addVendorBtn">추가</button>
+    </div>
+    <div id="vendorList"></div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn accent block" id="startViewerBtn">📖 순서대로 보기 시작</button>
+    </div>
+  </div>
+</div>
+
+<div class="viewer hidden" id="viewer">
+  <div class="viewer-top">
+    <div><div class="vname" id="viewerName"></div><div class="idx" id="viewerIdx"></div></div>
+    <button class="btn sm" id="viewerCloseBtn">닫기</button>
+  </div>
+  <div class="viewer-body" id="viewerBody">
+    <img id="viewerImg">
+  </div>
+  <div class="viewer-nav">
+    <button class="btn" id="viewerPrevBtn">‹ 이전</button>
+    <button class="btn" id="viewerNextBtn">다음 ›</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+(function(){
+  'use strict';
+
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+  function alert(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2400);
+  }
+
+  function todayStr(){ return new Date().toDateString(); }
+
+  var VENDOR_KEY = 'garak.vendorOrder.v1';
+  var CROPS_KEY = 'garak.crops.v1';
+  var DATE_KEY = 'garak.date.v1';
+
+  function loadVendorOrder(){
+    try { return JSON.parse(localStorage.getItem(VENDOR_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveVendorOrder(list){
+    try { localStorage.setItem(VENDOR_KEY, JSON.stringify(list)); } catch(e){}
+  }
+  function loadCrops(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return {};
+    try { return JSON.parse(localStorage.getItem(CROPS_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveCrops(map){
+    try {
+      localStorage.setItem(CROPS_KEY, JSON.stringify(map));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){
+      // 용량 초과 등으로 저장 실패해도 화면 동작에는 지장 없게 조용히 무시함.
+    }
+  }
+
+  var vendorOrder = loadVendorOrder(); // ["다농마트","우주식품", ...]
+  var crops = loadCrops(); // { "다농마트": {dataUrl, srcIndex}, ... }
+  var sourceImages = []; // [{img, url}] 오늘 올린 원본 사진들
+  var currentSourceIndex = 0;
+  var pendingVendorName = null;
+
+  var fileInput = document.getElementById('fileInput');
+  var imgTabs = document.getElementById('imgTabs');
+  var cropCard = document.getElementById('cropCard');
+  var cropStage = document.getElementById('cropStage');
+  var cropImg = document.getElementById('cropImg');
+  var cropBox = document.getElementById('cropBox');
+  var vendorListEl = document.getElementById('vendorList');
+
+  function renderImgTabs(){
+    imgTabs.innerHTML = '';
+    if (sourceImages.length < 2) return;
+    sourceImages.forEach(function(_, i){
+      var b = document.createElement('button');
+      b.className = 'btn sm' + (i === currentSourceIndex ? ' accent' : '');
+      b.textContent = '사진 ' + (i + 1);
+      b.addEventListener('click', function(){ currentSourceIndex = i; renderImgTabs(); });
+      imgTabs.appendChild(b);
+    });
+  }
+
+  fileInput.addEventListener('change', function(){
+    var files = Array.prototype.slice.call(fileInput.files || []);
+    if (!files.length) return;
+    var loaded = 0;
+    files.forEach(function(f){
+      var url = URL.createObjectURL(f);
+      var im = new Image();
+      im.onload = function(){
+        sourceImages.push({ img: im, url: url });
+        loaded++;
+        if (loaded === files.length){
+          currentSourceIndex = sourceImages.length - files.length;
+          renderImgTabs();
+        }
+      };
+      im.src = url;
+    });
+    fileInput.value = '';
+  });
+
+  // ---------- 거래처 목록 ----------
+  function renderVendorList(){
+    vendorListEl.innerHTML = '';
+    if (!vendorOrder.length){
+      vendorListEl.innerHTML = '<div class="empty">거래처를 추가해주세요.</div>';
+      return;
+    }
+    vendorOrder.forEach(function(name, i){
+      var has = !!crops[name];
+      var row = document.createElement('div');
+      row.className = 'vendor-item' + (has ? ' done' : '');
+      row.innerHTML =
+        '<div class="order-arrows">' +
+          '<button data-up="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>▲</button>' +
+          '<button data-down="' + i + '" ' + (i === vendorOrder.length - 1 ? 'disabled' : '') + '>▼</button>' +
+        '</div>' +
+        '<div class="name">' + escapeHtml(name) + '<div class="status">' + (has ? '✅ 자리 표시됨' : (sourceImages.length ? '자리 표시 필요' : '오늘 사진부터 올려주세요')) + '</div></div>' +
+        '<button class="btn sm" data-mark="' + i + '" ' + (sourceImages.length ? '' : 'disabled') + '>' + (has ? '다시 그리기' : '자리 표시') + '</button>' +
+        '<button class="btn sm danger" data-del="' + i + '">삭제</button>';
+      vendorListEl.appendChild(row);
+    });
+
+    vendorListEl.querySelectorAll('[data-mark]').forEach(function(b){
+      b.addEventListener('click', function(){ startCrop(vendorOrder[+this.dataset.mark]); });
+    });
+    vendorListEl.querySelectorAll('[data-del]').forEach(function(b){
+      b.addEventListener('click', function(){
+        if (this.dataset.armed !== '1'){
+          this.dataset.armed = '1';
+          this.textContent = '한번 더 누르면 삭제';
+          setTimeout(function(){ b.dataset.armed = '0'; b.textContent = '삭제'; }, 3000);
+          return;
+        }
+        var name = vendorOrder[+this.dataset.del];
+        vendorOrder.splice(+this.dataset.del, 1);
+        delete crops[name];
+        saveVendorOrder(vendorOrder); saveCrops(crops); renderVendorList();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-up]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var i = +this.dataset.up;
+        var tmp = vendorOrder[i - 1]; vendorOrder[i - 1] = vendorOrder[i]; vendorOrder[i] = tmp;
+        saveVendorOrder(vendorOrder); renderVendorList();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-down]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var i = +this.dataset.down;
+        var tmp = vendorOrder[i + 1]; vendorOrder[i + 1] = vendorOrder[i]; vendorOrder[i] = tmp;
+        saveVendorOrder(vendorOrder); renderVendorList();
+      });
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s || '').replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  var addVendorInput = document.getElementById('addVendorInput');
+  function addVendorFromInput(){
+    var name = (addVendorInput.value || '').trim();
+    if (!name) return;
+    if (vendorOrder.indexOf(name) !== -1){ alert('이미 있는 거래처예요.'); return; }
+    vendorOrder.push(name);
+    saveVendorOrder(vendorOrder);
+    addVendorInput.value = '';
+    renderVendorList();
+  }
+  document.getElementById('addVendorBtn').addEventListener('click', addVendorFromInput);
+  addVendorInput.addEventListener('keydown', function(evt){
+    if (evt.key === 'Enter'){ evt.preventDefault(); addVendorFromInput(); }
+  });
+
+  // ---------- 자리(영역) 표시 ----------
+  var dragging = false, startX = 0, startY = 0, curRect = null;
+
+  function startCrop(vendorName){
+    if (!sourceImages.length){ alert('먼저 사진을 올려주세요.'); return; }
+    pendingVendorName = vendorName;
+    var src = sourceImages[currentSourceIndex];
+    cropImg.src = src.url;
+    cropBox.style.display = 'none';
+    cropCard.classList.remove('hidden');
+    cropCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function stagePoint(evt){
+    var rect = cropStage.getBoundingClientRect();
+    var t = (evt.touches && evt.touches[0]) || evt;
+    return { x: Math.min(Math.max(t.clientX - rect.left, 0), rect.width), y: Math.min(Math.max(t.clientY - rect.top, 0), rect.height) };
+  }
+
+  function onDragStart(evt){
+    if (!pendingVendorName) return;
+    evt.preventDefault();
+    dragging = true;
+    var p = stagePoint(evt);
+    startX = p.x; startY = p.y;
+    cropBox.style.display = 'block';
+    updateBox(p);
+  }
+  function onDragMove(evt){
+    if (!dragging) return;
+    evt.preventDefault();
+    updateBox(stagePoint(evt));
+  }
+  function onDragEnd(){ dragging = false; }
+
+  function updateBox(p){
+    var x = Math.min(startX, p.x), y = Math.min(startY, p.y);
+    var w = Math.abs(p.x - startX), h = Math.abs(p.y - startY);
+    curRect = { x: x, y: y, w: w, h: h, stageW: cropStage.clientWidth, stageH: cropStage.clientHeight };
+    cropBox.style.left = x + 'px'; cropBox.style.top = y + 'px';
+    cropBox.style.width = w + 'px'; cropBox.style.height = h + 'px';
+  }
+
+  cropStage.addEventListener('mousedown', onDragStart);
+  cropStage.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragEnd);
+  cropStage.addEventListener('touchstart', onDragStart, { passive: false });
+  cropStage.addEventListener('touchmove', onDragMove, { passive: false });
+  cropStage.addEventListener('touchend', onDragEnd);
+
+  document.getElementById('cropCancelBtn').addEventListener('click', function(){
+    pendingVendorName = null;
+    cropCard.classList.add('hidden');
+  });
+
+  document.getElementById('cropSaveBtn').addEventListener('click', function(){
+    if (!curRect || curRect.w < 10 || curRect.h < 10){
+      alert('네모 박스를 좀 더 크게 그려주세요.');
+      return;
+    }
+    var src = sourceImages[currentSourceIndex];
+    var scaleX = src.img.naturalWidth / curRect.stageW;
+    var scaleY = src.img.naturalHeight / curRect.stageH;
+    var sx = curRect.x * scaleX, sy = curRect.y * scaleY;
+    var sw = curRect.w * scaleX, sh = curRect.h * scaleY;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(src.img, sx, sy, sw, sh, 0, 0, sw, sh);
+    var dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    crops[pendingVendorName] = { dataUrl: dataUrl };
+    saveCrops(crops);
+
+    pendingVendorName = null;
+    cropCard.classList.add('hidden');
+    renderVendorList();
+  });
+
+  // ---------- 순서대로 보기 (뷰어) ----------
+  var viewer = document.getElementById('viewer');
+  var viewerImg = document.getElementById('viewerImg');
+  var viewerName = document.getElementById('viewerName');
+  var viewerIdx = document.getElementById('viewerIdx');
+  var viewerBody = document.getElementById('viewerBody');
+  var viewList = [];
+  var viewPos = 0;
+
+  document.getElementById('startViewerBtn').addEventListener('click', function(){
+    viewList = vendorOrder.filter(function(name){ return !!crops[name]; });
+    if (!viewList.length){ alert('먼저 거래처 자리를 하나 이상 표시해주세요.'); return; }
+    viewPos = 0;
+    showViewerCard();
+    viewer.classList.remove('hidden');
+  });
+
+  function showViewerCard(){
+    var name = viewList[viewPos];
+    viewerName.textContent = name;
+    viewerIdx.textContent = (viewPos + 1) + ' / ' + viewList.length;
+    viewerImg.src = crops[name].dataUrl;
+    viewerBody.scrollTop = 0;
+  }
+
+  document.getElementById('viewerCloseBtn').addEventListener('click', function(){ viewer.classList.add('hidden'); });
+  document.getElementById('viewerPrevBtn').addEventListener('click', function(){
+    if (viewPos > 0){ viewPos--; showViewerCard(); }
+  });
+  document.getElementById('viewerNextBtn').addEventListener('click', function(){
+    if (viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
+  });
+
+  var touchStartX = null;
+  viewerBody.addEventListener('touchstart', function(evt){ touchStartX = evt.touches[0].clientX; }, { passive: true });
+  viewerBody.addEventListener('touchend', function(evt){
+    if (touchStartX === null) return;
+    var dx = evt.changedTouches[0].clientX - touchStartX;
+    touchStartX = null;
+    if (Math.abs(dx) < 50) return;
+    if (dx < 0 && viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
+    else if (dx > 0 && viewPos > 0){ viewPos--; showViewerCard(); }
+  }, { passive: true });
+
+  // ---------- 초기 거래처 목록이 하나도 없으면 예시로 채워줌 ----------
+  if (!vendorOrder.length){
+    vendorOrder = ['다농마트', '우주식품', '태인성', '충북', '신아물산', '충무(금길수산)', '유창', '아침에찬', '세진or조양', '스마일', '광덕', '진양', '신흥'];
+    saveVendorOrder(vendorOrder);
+  }
+
+  renderVendorList();
+})();
+</script>
+</body>
+</html>
