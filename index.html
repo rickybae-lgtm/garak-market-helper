@@ -161,13 +161,28 @@
 
   function renderImgTabs(){
     imgTabs.innerHTML = '';
-    if (sourceImages.length < 2) return;
+    if (!sourceImages.length) return;
     sourceImages.forEach(function(_, i){
+      var wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '4px';
       var b = document.createElement('button');
       b.className = 'btn sm' + (i === currentSourceIndex ? ' accent' : '');
       b.textContent = '사진 ' + (i + 1);
       b.addEventListener('click', function(){ currentSourceIndex = i; renderImgTabs(); });
-      imgTabs.appendChild(b);
+      var del = document.createElement('button');
+      del.className = 'btn sm danger';
+      del.textContent = '삭제';
+      del.addEventListener('click', function(){
+        URL.revokeObjectURL(sourceImages[i].url);
+        sourceImages.splice(i, 1);
+        if (currentSourceIndex >= sourceImages.length) currentSourceIndex = Math.max(0, sourceImages.length - 1);
+        renderImgTabs();
+        renderVendorList();
+      });
+      wrap.appendChild(b); wrap.appendChild(del);
+      imgTabs.appendChild(wrap);
     });
   }
 
@@ -184,6 +199,7 @@
         if (loaded === files.length){
           currentSourceIndex = sourceImages.length - files.length;
           renderImgTabs();
+          renderVendorList();
         }
       };
       im.src = url;
