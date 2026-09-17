@@ -27,19 +27,26 @@
   input[type=text]{ width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink);
     border-radius:10px; padding:11px 12px; font-size:15px; }
   .vendor-item{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--line);
-    border-radius:12px; padding:10px 10px; margin-bottom:8px; }
+    border-radius:12px; padding:10px 10px; margin-bottom:8px; opacity:0.68; }
   .vendor-item .name{ flex:1; font-weight:700; font-size:15px; }
   .vendor-item .status{ font-size:12px; color:var(--sub); }
-  .vendor-item.done{ border-color:var(--accent); }
+  .vendor-item.done{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); opacity:1; }
   .vendor-item.done .status{ color:var(--accent); }
+  .badge-dot{ width:22px; height:22px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center;
+    justify-content:center; font-size:13px; background:var(--surface); border:1px solid var(--line); }
+  .vendor-item.done .badge-dot{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .order-arrows{ display:flex; flex-direction:column; gap:2px; }
   .order-arrows button{ background:none; border:none; color:var(--sub); font-size:14px; cursor:pointer; padding:2px 4px; }
   .hidden{ display:none !important; }
   .empty{ color:var(--sub); font-size:14px; text-align:center; padding:16px 0; }
-  #cropStage{ position:relative; width:100%; touch-action:none; border-radius:12px; overflow:hidden;
-    background:#000; margin-top:10px; }
-  #cropStage img{ display:block; width:100%; height:auto; user-select:none; -webkit-user-drag:none; }
-  #cropBox{ position:absolute; border:2px solid var(--accent); background:rgba(79,140,255,0.18); display:none; }
+  #cropStage{ position:relative; width:100%; max-height:65vh; overflow:auto; -webkit-overflow-scrolling:touch;
+    border-radius:12px; background:#000; margin-top:10px; }
+  #cropWrap{ position:relative; }
+  #cropWrap img{ display:block; width:100%; height:auto; user-select:none; -webkit-user-drag:none; }
+  #cropBox{ position:absolute; border:2px solid var(--accent); background:rgba(79,140,255,0.18); display:none; pointer-events:none; }
+  #cropDot{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 0 4px rgba(255,255,255,0.5); display:none; pointer-events:none; }
+  .zoom-hint{ font-size:12px; color:var(--sub); margin:2px 0 8px; }
   .viewer{ position:fixed; inset:0; background:#000; z-index:50; display:flex; flex-direction:column; }
   .viewer-top{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
     background:#0b1220; border-bottom:1px solid var(--line); }
@@ -68,10 +75,20 @@
   </div>
 
   <div class="card hidden" id="cropCard">
-    <div class="step-title">2. 거래처 자리 표시하기 (사진 위에서 손가락으로 네모 그리기)</div>
+    <div class="step-title">2. 거래처 자리 표시하기</div>
+    <div class="zoom-hint">먼저 필요하면 확대 → 표에서 <b>왼쪽 위</b> 콕, <b>오른쪽 아래</b> 콕 (두 번 터치)</div>
+    <div class="row" style="margin-bottom:8px;">
+      <button class="btn sm" id="zoom100Btn">100%</button>
+      <button class="btn sm" id="zoom160Btn">160%</button>
+      <button class="btn sm" id="zoom220Btn">220%</button>
+      <button class="btn sm" id="cropResetPointsBtn">다시 찍기</button>
+    </div>
     <div id="cropStage">
-      <img id="cropImg">
-      <div id="cropBox"></div>
+      <div id="cropWrap">
+        <img id="cropImg">
+        <div id="cropBox"></div>
+        <div id="cropDot"></div>
+      </div>
     </div>
     <div class="row" style="margin-top:10px;">
       <button class="btn sm" id="cropCancelBtn">취소</button>
@@ -84,6 +101,7 @@
       <input type="text" id="addVendorInput" placeholder="새 거래처 이름" style="flex:1;">
       <button class="btn accent sm" id="addVendorBtn">추가</button>
     </div>
+    <div id="vendorSummary" class="zoom-hint"></div>
     <div id="vendorList"></div>
     <div class="row" style="margin-top:10px;">
       <button class="btn accent block" id="startViewerBtn">📖 순서대로 보기 시작</button>
@@ -145,6 +163,34 @@
     }
   }
 
+  // 올린 원본 사진도 임시로 저장해둠 — 폰 브라우저가 메모리 때문에 화면을 새로고침해서
+  // "사진이 사라지는" 경우를 대비한 것. 용량을 줄이기 위해 살짝 압축해서 저장함.
+  var SRC_KEY = 'garak.sourceImages.v1';
+  function loadSourceImagesStorage(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return [];
+    try { return JSON.parse(localStorage.getItem(SRC_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveSourceImagesStorage(){
+    try {
+      var list = sourceImages.map(function(s){ return s.storedDataUrl; }).filter(Boolean);
+      localStorage.setItem(SRC_KEY, JSON.stringify(list));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){
+      // 사진이 커서 저장 공간이 부족하면 조용히 실패시킴 (지금 화면에서 쓰는 덴 지장 없음).
+    }
+  }
+  function makeStoredDataUrl(img){
+    var maxW = 1600;
+    var scale = Math.min(1, maxW / img.naturalWidth);
+    var w = Math.max(1, Math.round(img.naturalWidth * scale));
+    var h = Math.max(1, Math.round(img.naturalHeight * scale));
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+
   var vendorOrder = loadVendorOrder(); // ["다농마트","우주식품", ...]
   var crops = loadCrops(); // { "다농마트": {dataUrl, srcIndex}, ... }
   var sourceImages = []; // [{img, url}] 오늘 올린 원본 사진들
@@ -175,9 +221,10 @@
       del.className = 'btn sm danger';
       del.textContent = '삭제';
       del.addEventListener('click', function(){
-        URL.revokeObjectURL(sourceImages[i].url);
+        try { URL.revokeObjectURL(sourceImages[i].url); } catch(e){}
         sourceImages.splice(i, 1);
         if (currentSourceIndex >= sourceImages.length) currentSourceIndex = Math.max(0, sourceImages.length - 1);
+        saveSourceImagesStorage();
         renderImgTabs();
         renderVendorList();
       });
@@ -194,12 +241,13 @@
       var url = URL.createObjectURL(f);
       var im = new Image();
       im.onload = function(){
-        sourceImages.push({ img: im, url: url });
+        sourceImages.push({ img: im, url: url, storedDataUrl: makeStoredDataUrl(im) });
         loaded++;
         if (loaded === files.length){
           currentSourceIndex = sourceImages.length - files.length;
           renderImgTabs();
           renderVendorList();
+          saveSourceImagesStorage();
         }
       };
       im.src = url;
@@ -207,12 +255,38 @@
     fileInput.value = '';
   });
 
+  // 새로고침/백그라운드 등으로 화면이 초기화됐을 때, 오늘 올렸던 사진이 저장돼 있으면 복구함.
+  (function restoreSourceImages(){
+    var stored = loadSourceImagesStorage();
+    if (!stored.length) return;
+    var loaded = 0;
+    stored.forEach(function(dataUrl){
+      var im = new Image();
+      im.onload = function(){
+        sourceImages.push({ img: im, url: dataUrl, storedDataUrl: dataUrl });
+        loaded++;
+        if (loaded === stored.length){
+          currentSourceIndex = 0;
+          renderImgTabs();
+          renderVendorList();
+        }
+      };
+      im.src = dataUrl;
+    });
+  })();
+
   // ---------- 거래처 목록 ----------
   function renderVendorList(){
     vendorListEl.innerHTML = '';
+    var summaryEl = document.getElementById('vendorSummary');
     if (!vendorOrder.length){
       vendorListEl.innerHTML = '<div class="empty">거래처를 추가해주세요.</div>';
+      if (summaryEl) summaryEl.textContent = '';
       return;
+    }
+    if (summaryEl){
+      var doneCount = vendorOrder.filter(function(n){ return !!crops[n]; }).length;
+      summaryEl.textContent = '✓ 표시 완료 ' + doneCount + ' / 안 한 곳 ' + (vendorOrder.length - doneCount);
     }
     vendorOrder.forEach(function(name, i){
       var has = !!crops[name];
@@ -223,7 +297,9 @@
           '<button data-up="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>▲</button>' +
           '<button data-down="' + i + '" ' + (i === vendorOrder.length - 1 ? 'disabled' : '') + '>▼</button>' +
         '</div>' +
-        '<div class="name">' + escapeHtml(name) + '<div class="status">' + (has ? '✅ 자리 표시됨' : (sourceImages.length ? '자리 표시 필요' : '오늘 사진부터 올려주세요')) + '</div></div>' +
+        '<div class="badge-dot">' + (has ? '✓' : '') + '</div>' +
+        '<div class="name">' + escapeHtml(name) + '<div class="status">' + (has ? '자리 표시됨' : (sourceImages.length ? '아직 안 함' : '오늘 사진부터 올려주세요')) + '</div></div>' +
+        (has ? '<button class="btn sm accent" data-view="' + i + '">보기</button>' : '') +
         '<button class="btn sm" data-mark="' + i + '" ' + (sourceImages.length ? '' : 'disabled') + '>' + (has ? '다시 그리기' : '자리 표시') + '</button>' +
         '<button class="btn sm danger" data-del="' + i + '">삭제</button>';
       vendorListEl.appendChild(row);
@@ -231,6 +307,9 @@
 
     vendorListEl.querySelectorAll('[data-mark]').forEach(function(b){
       b.addEventListener('click', function(){ startCrop(vendorOrder[+this.dataset.mark]); });
+    });
+    vendorListEl.querySelectorAll('[data-view]').forEach(function(b){
+      b.addEventListener('click', function(){ openViewerAt(vendorOrder[+this.dataset.view]); });
     });
     vendorListEl.querySelectorAll('[data-del]').forEach(function(b){
       b.addEventListener('click', function(){
@@ -283,55 +362,69 @@
     if (evt.key === 'Enter'){ evt.preventDefault(); addVendorFromInput(); }
   });
 
-  // ---------- 자리(영역) 표시 ----------
-  var dragging = false, startX = 0, startY = 0, curRect = null;
+  // ---------- 자리(영역) 표시 (두 번 터치: 왼쪽위 콕 -> 오른쪽아래 콕) ----------
+  var cropWrap = document.getElementById('cropWrap');
+  var cropDot = document.getElementById('cropDot');
+  var zoomLevel = 1;
+  var points = [];
+
+  function applyZoom(){
+    var baseW = cropStage.clientWidth;
+    cropWrap.style.width = Math.round(baseW * zoomLevel) + 'px';
+  }
+  function setZoomBtnActive(){
+    ['zoom100Btn','zoom160Btn','zoom220Btn'].forEach(function(id){
+      document.getElementById(id).classList.remove('accent');
+    });
+    var map = { 1: 'zoom100Btn', 1.6: 'zoom160Btn', 2.2: 'zoom220Btn' };
+    var btn = document.getElementById(map[zoomLevel]);
+    if (btn) btn.classList.add('accent');
+  }
+  document.getElementById('zoom100Btn').addEventListener('click', function(){ zoomLevel = 1; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('zoom160Btn').addEventListener('click', function(){ zoomLevel = 1.6; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('zoom220Btn').addEventListener('click', function(){ zoomLevel = 2.2; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('cropResetPointsBtn').addEventListener('click', resetPoints);
+
+  function resetPoints(){
+    points = [];
+    cropDot.style.display = 'none';
+    cropBox.style.display = 'none';
+  }
 
   function startCrop(vendorName){
     if (!sourceImages.length){ alert('먼저 사진을 올려주세요.'); return; }
     pendingVendorName = vendorName;
     var src = sourceImages[currentSourceIndex];
     cropImg.src = src.url;
-    cropBox.style.display = 'none';
+    resetPoints();
+    zoomLevel = 1;
+    setZoomBtnActive();
     cropCard.classList.remove('hidden');
     cropCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    requestAnimationFrame(applyZoom);
   }
 
-  function stagePoint(evt){
-    var rect = cropStage.getBoundingClientRect();
-    var t = (evt.touches && evt.touches[0]) || evt;
-    return { x: Math.min(Math.max(t.clientX - rect.left, 0), rect.width), y: Math.min(Math.max(t.clientY - rect.top, 0), rect.height) };
-  }
-
-  function onDragStart(evt){
+  function onStageTap(evt){
     if (!pendingVendorName) return;
-    evt.preventDefault();
-    dragging = true;
-    var p = stagePoint(evt);
-    startX = p.x; startY = p.y;
-    cropBox.style.display = 'block';
-    updateBox(p);
+    var rect = cropWrap.getBoundingClientRect();
+    var t = (evt.changedTouches && evt.changedTouches[0]) || evt;
+    var x = t.clientX - rect.left, y = t.clientY - rect.top;
+    if (points.length >= 2) resetPoints();
+    points.push({ x: x, y: y });
+    if (points.length === 1){
+      cropDot.style.left = x + 'px'; cropDot.style.top = y + 'px'; cropDot.style.display = 'block';
+      cropBox.style.display = 'none';
+    } else {
+      cropDot.style.display = 'none';
+      var x0 = Math.min(points[0].x, points[1].x), y0 = Math.min(points[0].y, points[1].y);
+      var w = Math.abs(points[1].x - points[0].x), h = Math.abs(points[1].y - points[0].y);
+      cropBox.style.left = x0 + 'px'; cropBox.style.top = y0 + 'px';
+      cropBox.style.width = w + 'px'; cropBox.style.height = h + 'px';
+      cropBox.style.display = 'block';
+    }
   }
-  function onDragMove(evt){
-    if (!dragging) return;
-    evt.preventDefault();
-    updateBox(stagePoint(evt));
-  }
-  function onDragEnd(){ dragging = false; }
-
-  function updateBox(p){
-    var x = Math.min(startX, p.x), y = Math.min(startY, p.y);
-    var w = Math.abs(p.x - startX), h = Math.abs(p.y - startY);
-    curRect = { x: x, y: y, w: w, h: h, stageW: cropStage.clientWidth, stageH: cropStage.clientHeight };
-    cropBox.style.left = x + 'px'; cropBox.style.top = y + 'px';
-    cropBox.style.width = w + 'px'; cropBox.style.height = h + 'px';
-  }
-
-  cropStage.addEventListener('mousedown', onDragStart);
-  cropStage.addEventListener('mousemove', onDragMove);
-  window.addEventListener('mouseup', onDragEnd);
-  cropStage.addEventListener('touchstart', onDragStart, { passive: false });
-  cropStage.addEventListener('touchmove', onDragMove, { passive: false });
-  cropStage.addEventListener('touchend', onDragEnd);
+  // 'click'은 터치/마우스 둘 다에서 발생하므로(드래그 없이) 이거 하나로 충분함.
+  cropWrap.addEventListener('click', onStageTap);
 
   document.getElementById('cropCancelBtn').addEventListener('click', function(){
     pendingVendorName = null;
@@ -339,15 +432,19 @@
   });
 
   document.getElementById('cropSaveBtn').addEventListener('click', function(){
-    if (!curRect || curRect.w < 10 || curRect.h < 10){
-      alert('네모 박스를 좀 더 크게 그려주세요.');
+    if (points.length < 2){
+      alert('왼쪽 위, 오른쪽 아래 두 번 콕 짚어주세요.');
+      return;
+    }
+    var x0 = Math.min(points[0].x, points[1].x), y0 = Math.min(points[0].y, points[1].y);
+    var w = Math.abs(points[1].x - points[0].x), h = Math.abs(points[1].y - points[0].y);
+    if (w < 10 || h < 10){
+      alert('선택한 영역이 너무 작아요. 다시 찍어주세요.');
       return;
     }
     var src = sourceImages[currentSourceIndex];
-    var scaleX = src.img.naturalWidth / curRect.stageW;
-    var scaleY = src.img.naturalHeight / curRect.stageH;
-    var sx = curRect.x * scaleX, sy = curRect.y * scaleY;
-    var sw = curRect.w * scaleX, sh = curRect.h * scaleY;
+    var scale = src.img.naturalWidth / cropWrap.clientWidth;
+    var sx = x0 * scale, sy = y0 * scale, sw = w * scale, sh = h * scale;
 
     var canvas = document.createElement('canvas');
     canvas.width = sw; canvas.height = sh;
@@ -379,6 +476,17 @@
     showViewerCard();
     viewer.classList.remove('hidden');
   });
+
+  // 거래처 목록에서 "보기"를 누르면, 그 거래처 한 장만 바로 크게 보여줌
+  // (이전/다음이나 스와이프로 다른 거래처로 넘어가는 것도 그대로 가능함).
+  function openViewerAt(name){
+    viewList = vendorOrder.filter(function(n){ return !!crops[n]; });
+    var idx = viewList.indexOf(name);
+    if (idx === -1){ alert('아직 자리 표시가 안 된 거래처예요.'); return; }
+    viewPos = idx;
+    showViewerCard();
+    viewer.classList.remove('hidden');
+  }
 
   function showViewerCard(){
     var name = viewList[viewPos];
