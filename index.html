@@ -46,14 +46,18 @@
   #cropBox{ position:absolute; border:2px solid var(--accent); background:rgba(79,140,255,0.18); display:none; pointer-events:none; }
   #cropDot{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
     background:var(--accent); box-shadow:0 0 0 4px rgba(255,255,255,0.5); display:none; pointer-events:none; }
+  .crop-handle{ position:absolute; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%;
+    background:var(--accent); border:3px solid #fff; display:none; z-index:5; touch-action:none; }
   .zoom-hint{ font-size:12px; color:var(--sub); margin:2px 0 8px; }
+  .viewer-body{ touch-action:none; }
+  .viewer-body-inner{ transform-origin:0 0; }
   .viewer{ position:fixed; inset:0; background:#000; z-index:50; display:flex; flex-direction:column; }
   .viewer-top{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
     background:#0b1220; border-bottom:1px solid var(--line); }
   .viewer-top .vname{ font-size:17px; font-weight:800; }
   .viewer-top .idx{ font-size:12px; color:var(--sub); }
-  .viewer-body{ flex:1; overflow:auto; display:flex; align-items:flex-start; justify-content:center; background:#000; }
-  .viewer-body img{ width:100%; height:auto; display:block; }
+  .viewer-body{ flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; }
+  .viewer-body img{ width:100%; height:auto; display:block; transform-origin:center center; will-change:transform; }
   .viewer-nav{ display:flex; gap:10px; padding:10px 12px; background:#0b1220; border-top:1px solid var(--line); }
   .viewer-nav .btn{ flex:1; font-size:20px; padding:14px; }
   .step-title{ font-size:13px; color:var(--sub); font-weight:700; margin-bottom:8px; }
@@ -76,7 +80,7 @@
 
   <div class="card hidden" id="cropCard">
     <div class="step-title">2. 거래처 자리 표시하기</div>
-    <div class="zoom-hint">먼저 필요하면 확대 → 표에서 <b>왼쪽 위</b> 콕, <b>오른쪽 아래</b> 콕 (두 번 터치)</div>
+    <div class="zoom-hint">두 손가락으로 오므리고 펴서 확대/축소 가능 · 표에서 <b>왼쪽 위</b> 콕, <b>오른쪽 아래</b> 콕 (두 번 터치) · 찍은 후엔 파란 점을 끌어서 미세 조정 가능</div>
     <div class="row" style="margin-bottom:8px;">
       <button class="btn sm" id="zoom100Btn">100%</button>
       <button class="btn sm" id="zoom160Btn">160%</button>
@@ -88,6 +92,8 @@
         <img id="cropImg">
         <div id="cropBox"></div>
         <div id="cropDot"></div>
+        <div id="cropHandleTL" class="crop-handle"></div>
+        <div id="cropHandleBR" class="crop-handle"></div>
       </div>
     </div>
     <div class="row" style="margin-top:10px;">
@@ -385,11 +391,86 @@
   document.getElementById('zoom220Btn').addEventListener('click', function(){ zoomLevel = 2.2; applyZoom(); setZoomBtnActive(); });
   document.getElementById('cropResetPointsBtn').addEventListener('click', resetPoints);
 
+  var cropHandleTL = document.getElementById('cropHandleTL');
+  var cropHandleBR = document.getElementById('cropHandleBR');
+  var boxRect = null; // { x0,y0,x1,y1 } — 두 점 찍은 후 손잡이로 미세조정할 때 씀
+
   function resetPoints(){
     points = [];
+    boxRect = null;
     cropDot.style.display = 'none';
     cropBox.style.display = 'none';
+    cropHandleTL.style.display = 'none';
+    cropHandleBR.style.display = 'none';
   }
+
+  function touchDistance(touches){
+    var dx = touches[0].clientX - touches[1].clientX;
+    var dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // 두 손가락으로 오므리고 펴서 확대/축소
+  var pinchStartDist = null, pinchStartZoom = 1;
+  cropWrap.addEventListener('touchstart', function(evt){
+    if (evt.touches.length === 2){
+      pinchStartDist = touchDistance(evt.touches);
+      pinchStartZoom = zoomLevel;
+    }
+  }, { passive: true });
+  cropWrap.addEventListener('touchmove', function(evt){
+    if (evt.touches.length === 2 && pinchStartDist){
+      evt.preventDefault();
+      var d = touchDistance(evt.touches);
+      zoomLevel = Math.max(1, Math.min(3, pinchStartZoom * (d / pinchStartDist)));
+      applyZoom();
+      setZoomBtnActive();
+    }
+  }, { passive: false });
+  cropWrap.addEventListener('touchend', function(evt){
+    if (evt.touches.length < 2) pinchStartDist = null;
+  });
+
+  function drawBoxFromRect(){
+    var x0 = Math.min(boxRect.x0, boxRect.x1), y0 = Math.min(boxRect.y0, boxRect.y1);
+    var x1 = Math.max(boxRect.x0, boxRect.x1), y1 = Math.max(boxRect.y0, boxRect.y1);
+    cropBox.style.left = x0 + 'px'; cropBox.style.top = y0 + 'px';
+    cropBox.style.width = (x1 - x0) + 'px'; cropBox.style.height = (y1 - y0) + 'px';
+    cropHandleTL.style.left = boxRect.x0 + 'px'; cropHandleTL.style.top = boxRect.y0 + 'px';
+    cropHandleBR.style.left = boxRect.x1 + 'px'; cropHandleBR.style.top = boxRect.y1 + 'px';
+  }
+
+  function bindHandleDrag(handleEl, isTL){
+    function getPoint(evt){
+      var rect = cropWrap.getBoundingClientRect();
+      var t = (evt.touches && evt.touches[0]) || (evt.changedTouches && evt.changedTouches[0]) || evt;
+      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    }
+    function onMove(evt){
+      evt.preventDefault();
+      var p = getPoint(evt);
+      if (isTL){ boxRect.x0 = p.x; boxRect.y0 = p.y; } else { boxRect.x1 = p.x; boxRect.y1 = p.y; }
+      drawBoxFromRect();
+    }
+    function onEnd(){
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+    }
+    handleEl.addEventListener('mousedown', function(evt){
+      evt.stopPropagation(); evt.preventDefault();
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onEnd);
+    });
+    handleEl.addEventListener('touchstart', function(evt){
+      evt.stopPropagation();
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+    }, { passive: true });
+  }
+  bindHandleDrag(cropHandleTL, true);
+  bindHandleDrag(cropHandleBR, false);
 
   function startCrop(vendorName){
     if (!sourceImages.length){ alert('먼저 사진을 올려주세요.'); return; }
@@ -416,11 +497,11 @@
       cropBox.style.display = 'none';
     } else {
       cropDot.style.display = 'none';
-      var x0 = Math.min(points[0].x, points[1].x), y0 = Math.min(points[0].y, points[1].y);
-      var w = Math.abs(points[1].x - points[0].x), h = Math.abs(points[1].y - points[0].y);
-      cropBox.style.left = x0 + 'px'; cropBox.style.top = y0 + 'px';
-      cropBox.style.width = w + 'px'; cropBox.style.height = h + 'px';
+      boxRect = { x0: points[0].x, y0: points[0].y, x1: points[1].x, y1: points[1].y };
+      drawBoxFromRect();
       cropBox.style.display = 'block';
+      cropHandleTL.style.display = 'block';
+      cropHandleBR.style.display = 'block';
     }
   }
   // 'click'은 터치/마우스 둘 다에서 발생하므로(드래그 없이) 이거 하나로 충분함.
@@ -432,12 +513,12 @@
   });
 
   document.getElementById('cropSaveBtn').addEventListener('click', function(){
-    if (points.length < 2){
+    if (points.length < 2 || !boxRect){
       alert('왼쪽 위, 오른쪽 아래 두 번 콕 짚어주세요.');
       return;
     }
-    var x0 = Math.min(points[0].x, points[1].x), y0 = Math.min(points[0].y, points[1].y);
-    var w = Math.abs(points[1].x - points[0].x), h = Math.abs(points[1].y - points[0].y);
+    var x0 = Math.min(boxRect.x0, boxRect.x1), y0 = Math.min(boxRect.y0, boxRect.y1);
+    var w = Math.abs(boxRect.x1 - boxRect.x0), h = Math.abs(boxRect.y1 - boxRect.y0);
     if (w < 10 || h < 10){
       alert('선택한 영역이 너무 작아요. 다시 찍어주세요.');
       return;
@@ -488,12 +569,21 @@
     viewer.classList.remove('hidden');
   }
 
+  var viewerScale = 1, viewerTX = 0, viewerTY = 0;
+  function applyViewerTransform(){
+    viewerImg.style.transform = 'translate(' + viewerTX + 'px,' + viewerTY + 'px) scale(' + viewerScale + ')';
+  }
+  function resetViewerTransform(){
+    viewerScale = 1; viewerTX = 0; viewerTY = 0;
+    applyViewerTransform();
+  }
+
   function showViewerCard(){
     var name = viewList[viewPos];
     viewerName.textContent = name;
     viewerIdx.textContent = (viewPos + 1) + ' / ' + viewList.length;
     viewerImg.src = crops[name].dataUrl;
-    viewerBody.scrollTop = 0;
+    resetViewerTransform();
   }
 
   document.getElementById('viewerCloseBtn').addEventListener('click', function(){ viewer.classList.add('hidden'); });
@@ -504,15 +594,64 @@
     if (viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
   });
 
+  // 사진 확대/이동: 손가락 두 개로 오므리고 펴서 확대, 확대된 상태에서 한 손가락으로 끌면 이동.
+  // 확대가 안 된 상태(100%)에서 한 손가락으로 밀면 이전/다음 거래처로 넘어감. 두 번 톡톡 두드리면 확대/축소 전환.
   var touchStartX = null;
-  viewerBody.addEventListener('touchstart', function(evt){ touchStartX = evt.touches[0].clientX; }, { passive: true });
+  var vPinchStartDist = null, vPinchStartScale = 1;
+  var vPanStart = null;
+  var lastTapTime = 0;
+
+  viewerBody.addEventListener('touchstart', function(evt){
+    if (evt.touches.length === 2){
+      vPinchStartDist = touchDistance(evt.touches);
+      vPinchStartScale = viewerScale;
+      touchStartX = null;
+    } else if (evt.touches.length === 1){
+      if (viewerScale > 1){
+        vPanStart = { x: evt.touches[0].clientX - viewerTX, y: evt.touches[0].clientY - viewerTY };
+      } else {
+        touchStartX = evt.touches[0].clientX;
+      }
+    }
+  }, { passive: true });
+
+  viewerBody.addEventListener('touchmove', function(evt){
+    if (evt.touches.length === 2 && vPinchStartDist){
+      evt.preventDefault();
+      var d = touchDistance(evt.touches);
+      viewerScale = Math.max(1, Math.min(4, vPinchStartScale * (d / vPinchStartDist)));
+      applyViewerTransform();
+    } else if (evt.touches.length === 1 && vPanStart){
+      evt.preventDefault();
+      viewerTX = evt.touches[0].clientX - vPanStart.x;
+      viewerTY = evt.touches[0].clientY - vPanStart.y;
+      applyViewerTransform();
+    }
+  }, { passive: false });
+
   viewerBody.addEventListener('touchend', function(evt){
-    if (touchStartX === null) return;
-    var dx = evt.changedTouches[0].clientX - touchStartX;
-    touchStartX = null;
-    if (Math.abs(dx) < 50) return;
-    if (dx < 0 && viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
-    else if (dx > 0 && viewPos > 0){ viewPos--; showViewerCard(); }
+    if (evt.touches.length < 2) vPinchStartDist = null;
+    if (evt.touches.length < 1){
+      vPanStart = null;
+      if (touchStartX !== null){
+        var dx = evt.changedTouches[0].clientX - touchStartX;
+        touchStartX = null;
+        if (Math.abs(dx) >= 50){
+          if (dx < 0 && viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
+          else if (dx > 0 && viewPos > 0){ viewPos--; showViewerCard(); }
+          return;
+        }
+        // 짧게 톡 두드린 경우 더블탭 확대/축소 판정
+        var now = Date.now();
+        if (now - lastTapTime < 320){
+          if (viewerScale > 1) resetViewerTransform();
+          else { viewerScale = 2.5; applyViewerTransform(); }
+          lastTapTime = 0;
+        } else {
+          lastTapTime = now;
+        }
+      }
+    }
   }, { passive: true });
 
   // ---------- 초기 거래처 목록이 하나도 없으면 예시로 채워줌 ----------
