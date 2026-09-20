@@ -89,7 +89,7 @@
   @media (max-width:420px){ .tab-btn{ font-size:10.5px; padding:7px 2px; } }
   .tab-btn.active{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .call-btn{ display:inline-flex; align-items:center; justify-content:center; flex:none;
-    width:34px; height:34px; border-radius:50%; background:var(--accent); border:none; }
+    width:34px; height:34px; border-radius:50%; background:#fff; border:none; box-shadow:0 0 0 1px var(--line); }
   .call-btn svg{ width:18px; height:18px; }
 </style>
 </head>
@@ -297,15 +297,23 @@
   }
   // 업체목록에 등록해둔 전화번호를(있으면) 이름으로 찾아준다. 이름 표기가 정확히 안 맞아도
   // sortVendorsByVendorList와 같은 방식(공백/괄호 제거 후 비교, 그다음 부분 일치)으로 찾는다.
+  // 예전 버그로 저장돼있을 수 있는 "undefined"/"null" 글자는 번호가 없는 것으로 취급함.
+  function cleanPhoneValue(v){
+    v = (v || '').trim();
+    if (!v || v === 'undefined' || v === 'null') return '';
+    return v;
+  }
   function findPhoneForVendor(name){
     var norm = normalizeVendorName(name);
     var keys = Object.keys(vendorPhones);
     for (var i = 0; i < keys.length; i++){
-      if (normalizeVendorName(keys[i]) === norm && vendorPhones[keys[i]]) return vendorPhones[keys[i]];
+      var p1 = cleanPhoneValue(vendorPhones[keys[i]]);
+      if (normalizeVendorName(keys[i]) === norm && p1) return p1;
     }
     for (var j = 0; j < keys.length; j++){
       var nk = normalizeVendorName(keys[j]);
-      if (nk && norm && vendorPhones[keys[j]] && (norm.indexOf(nk) !== -1 || nk.indexOf(norm) !== -1)) return vendorPhones[keys[j]];
+      var p2 = cleanPhoneValue(vendorPhones[keys[j]]);
+      if (nk && norm && p2 && (norm.indexOf(nk) !== -1 || nk.indexOf(norm) !== -1)) return p2;
     }
     return '';
   }
@@ -660,7 +668,7 @@
     }
     vendorOrder.forEach(function(name, i){
       var has = !!crops[name];
-      var phone = vendorPhones[name] || '';
+      var phone = cleanPhoneValue(vendorPhones[name]);
       var row = document.createElement('div');
       row.className = 'vendor-item' + (has ? ' done' : '');
       var phoneHtml;
@@ -754,7 +762,7 @@
     var i = +this.dataset.savephone;
     var name = vendorOrder[i];
     var inp = document.getElementById('phoneInput' + i);
-    var val = (inp && inp.value || '').trim();
+    var val = cleanPhoneValue(inp && inp.value);
     if (val) vendorPhones[name] = val; else delete vendorPhones[name];
     savePhones(vendorPhones);
     editingPhoneIndex = null;
@@ -767,9 +775,12 @@
   }
   function pickContactPhone(i){
     navigator.contacts.select(['tel', 'name'], { multiple: false }).then(function(contacts){
-      if (contacts && contacts.length && contacts[0].tel && contacts[0].tel.length){
+      // contacts[0].tel[0]이 비어있는데도 input.value에 그대로 넣으면 "undefined"라는
+      // 글자가 문자열로 저장돼버리는 문제가 있었음 — 실제 번호가 있을 때만 넣도록 함.
+      var tel = contacts && contacts.length && contacts[0].tel && contacts[0].tel[0];
+      if (tel){
         var inp = document.getElementById('phoneInput' + i);
-        if (inp) inp.value = contacts[0].tel[0];
+        if (inp) inp.value = tel;
       }
     }).catch(function(){
       // 사용자가 취소했거나 지원되지 않는 경우 — 조용히 무시하고 직접 입력하게 둠.
@@ -782,9 +793,9 @@
     });
   }
 
-  // 핸드폰에서 흔히 보는 파란 동그라미 + 흰색 수화기 모양의 전화 버튼.
-  var CALL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-    '<path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .8-.2 1L6.6 10.8z" fill="#fff"/>' +
+  // 핸드폰에서 흔히 보는 흰 동그라미 + 녹색 수화기 모양의 전화 버튼 (검증된 Material 아이콘 경로 사용).
+  var CALL_ICON_SVG = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
+    '<path fill="#34c759" d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>' +
     '</svg>';
   function callBtnHtml(phone){
     return '<a class="call-btn" href="tel:' + escapeHtml(phone) + '" title="' + escapeHtml(phone) + '">' + CALL_ICON_SVG + '</a>';
