@@ -449,6 +449,11 @@
   // 그래서 이런 줄(시트 제목, "기타사입" 같은 구분선, 맨 아래 관계없는 목록 등)은 사용자에게
   // 묻지 않고 조용히 무시(업체명으로 처리 → 품목 0개라 자동 제외)한다.
   // 진짜로 결과가 달라지는, 뒤에 품목이 딸려오는 줄만 사용자에게 물어본다.
+  // "바로 위/아래"로 인정해줄 줄 간격. 엑셀에서 빈 줄이 실제로는 존재하지 않고 그냥 건너뛰기 때문에
+  // (빈 줄엔 토큰이 안 생김), 단순히 "배열상 바로 앞/뒤 토큰"만 보면 저 멀리 떨어진 무관한 줄도
+  // 품목 바로 옆인 것처럼 착각할 수 있다. 그래서 실제 엑셀 행 번호 차이가 이 값 이내일 때만
+  // "진짜로 붙어있다"고 본다.
+  var ROW_ADJACENCY = 1;
   function markAutoResolvedAmbiguous(lane){
     for (var i = 0; i < lane.length; i++){
       var tok = lane[i];
@@ -457,13 +462,13 @@
       var hasFollowingItem = false;
       for (var j = i + 1; j < lane.length; j++){
         var nxt = lane[j];
-        if (nxt.kind === 'item'){ hasFollowingItem = true; break; }
+        if (nxt.kind === 'item'){ hasFollowingItem = (nxt.row - tok.row) <= ROW_ADJACENCY; break; }
         if (nxt.kind === 'vendor' || nxt.kind === 'ambiguous') break; // 다음 헤더성 줄이 나오면 거기서 멈춤
       }
       var hasPrecedingItem = false;
       for (var k = i - 1; k >= 0; k--){
         var prev = lane[k];
-        if (prev.kind === 'item'){ hasPrecedingItem = true; break; }
+        if (prev.kind === 'item'){ hasPrecedingItem = (tok.row - prev.row) <= ROW_ADJACENCY; break; }
         if (prev.kind === 'vendor' || prev.kind === 'ambiguous') break; // 그 전 헤더성 줄까지만 확인
       }
 
