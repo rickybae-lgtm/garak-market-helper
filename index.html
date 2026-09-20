@@ -283,9 +283,28 @@
   // 별도 버튼 없이, 파싱된 거래처를 항상 "업체목록"(vendorOrder, 층별로 미리 정리해둔 순서)
   // 기준으로 자동 정렬한다. 업체목록에 없는(새로 생긴) 거래처는 원래 엑셀에 나온 순서 그대로
   // 맨 뒤에 붙는다. 업체목록 자체를 층별로 한 번 정리해두면 매일 자동으로 그 순서를 따라간다.
+  // 엑셀에 적힌 이름("우주 식품(02-407-0450)")과 업체목록에 등록된 이름("우주식품")이
+  // 띄어쓰기·전화번호 유무 때문에 똑같지 않을 수 있어서, 공백/괄호(전화번호 등)를 지우고
+  // 비교한다. 그래도 정확히 안 맞으면 한쪽이 다른 쪽을 포함하는지(부분 일치)까지 확인한다.
+  function normalizeVendorName(s){
+    return String(s || '')
+      .replace(/\([^)]*\)/g, '') // 괄호 안 내용(전화번호, 부가설명 등) 제거
+      .replace(/\s+/g, '')       // 공백 제거
+      .trim();
+  }
   function sortVendorsByVendorList(vendors){
+    var normOrder = vendorOrder.map(normalizeVendorName);
     var withIdx = vendors.map(function(v, i){
-      var pos = vendorOrder.indexOf(v.name);
+      var norm = normalizeVendorName(v.name);
+      var pos = normOrder.indexOf(norm);
+      if (pos === -1){
+        // 정확히 안 맞으면 부분 일치(한쪽이 한쪽을 포함)로 한 번 더 찾아봄
+        for (var k = 0; k < normOrder.length; k++){
+          if (normOrder[k] && norm && (norm.indexOf(normOrder[k]) !== -1 || normOrder[k].indexOf(norm) !== -1)){
+            pos = k; break;
+          }
+        }
+      }
       return { v: v, key: pos === -1 ? (1e6 + i) : pos };
     });
     withIdx.sort(function(a, b){ return a.key - b.key; });
@@ -559,6 +578,12 @@
   fileInput.addEventListener('change', function(){
     var files = Array.prototype.slice.call(fileInput.files || []);
     if (!files.length) return;
+    // 오늘 첫 사진을 올리는 시점(그 전엔 사진이 하나도 없었을 때)이면, 예전에 표시해둔
+    // "자리 표시" 기록이 남아있더라도 오늘 것으로 착각하지 않게 싹 지우고 새로 시작한다.
+    if (!sourceImages.length){
+      crops = {};
+      saveCrops(crops);
+    }
     var loaded = 0;
     files.forEach(function(f){
       var url = URL.createObjectURL(f);
