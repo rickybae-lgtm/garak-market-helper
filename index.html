@@ -81,6 +81,11 @@
   .excel-item.qty-warn .itext{ font-weight:800; }
   .excel-summary{ font-size:12px; color:var(--sub); margin:4px 0 8px; }
   .excel-vendor.done{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
+  .ambig-row{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:10px; }
+  .ambig-row .atext{ font-weight:800; font-size:15px; margin-bottom:8px; }
+  .ambig-row .achoices{ display:flex; gap:8px; }
+  .ambig-row .achoice{ flex:1; padding:10px 6px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--fg); font-size:14px; font-weight:700; }
+  .ambig-row .achoice.picked{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 22%, transparent); }
   .tabbar{ position:sticky; top:0; z-index:20; display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
     background:var(--bg); padding:8px 2px; margin:0 0 10px; border-bottom:1px solid var(--line); }
   .tab-btn{ background:var(--surface); color:var(--sub); border:1px solid var(--line); border-radius:10px;
@@ -190,6 +195,16 @@
     <button class="btn sm" id="excelDetailCloseBtn">닫기</button>
   </div>
   <div class="viewer-body" id="excelDetailBody" style="overflow-y:auto; display:block; padding:12px;"></div>
+</div>
+
+<div class="viewer hidden" id="excelAmbiguous">
+  <div class="viewer-top">
+    <div><div class="vname">확인이 필요해요</div><div class="idx">업체목록에 없는 줄이에요. 업체명인지 추가설명인지 골라주세요.</div></div>
+  </div>
+  <div class="viewer-body" id="excelAmbiguousBody" style="overflow-y:auto; display:block; padding:12px;"></div>
+  <div class="viewer-nav">
+    <button class="btn accent" id="excelAmbiguousConfirmBtn">이대로 적용</button>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -366,12 +381,43 @@
   // 레인 안에서 위->아래로 훑으면서, 옆칸(수량)이 비어있으면 "새 거래처 이름"으로, 옆칸에
   // 뭔가 적혀 있으면 "그 거래처의 품목"으로 본다. 품목이 하나도 안 붙은 거래처(빈 구분선,
   // 이름만 있고 아직 안 적힌 곳 등)는 자동으로 걸러진다.
-  function parseLaneSheet(sheet){
+  // 업체명이 아니라 "~해주세요", "있으면 ~로 구입" 같은 추가설명(메모) 줄인지 대충 판별.
+  // 업체목록에 없는 줄이 나왔을 때 "업체명"/"추가설명" 중 뭘 기본값으로 미리 골라둘지 정하는 용도로만 씀
+  // (최종 판단은 사용자가 직접 확인창에서 고름).
+  function looksLikeNoteText(s){
+    if (!s) return false;
+    if (s.length > 14) return true;
+    if (/\s/.test(s)) return true;
+    if (/[~!?.…]/.test(s)) return true;
+    if (/(해주세요|주세요|해주|부탁|있으면|없으면|참고)/.test(s)) return true;
+    return false;
+  }
+
+  // 수량 없는 줄의 텍스트가 "업체목록"(vendorOrder)에 등록된 업체명과 같은지 확인.
+  // sortVendorsByVendorList와 같은 방식: 공백/괄호(전화번호 등) 지우고 비교, 정확히 안 맞으면 부분 일치까지 확인.
+  // 맞으면 업체목록에 등록된 정식 이름을 돌려줌(엑셀에 적힌 표기가 조금 달라도 목록 이름으로 통일됨).
+  function matchVendorName(text){
+    var norm = normalizeVendorName(text);
+    if (!norm) return null;
+    var normList = vendorOrder.map(normalizeVendorName);
+    var idx = normList.indexOf(norm);
+    if (idx !== -1) return vendorOrder[idx];
+    for (var k = 0; k < vendorOrder.length; k++){
+      var nk = normList[k];
+      if (nk && (norm.indexOf(nk) !== -1 || nk.indexOf(norm) !== -1)) return vendorOrder[k];
+    }
+    return null;
+  }
+
+  // 가락시장 시트를 훑어서 각 레인(A/C/E...열)을 토큰 배열로 만든다.
+  // 수량이 있으면 품목, 수량이 없으면: 업체목록에 있는 이름이면 바로 "업체"로 확정,
+  // 업체목록에 없으면 "ambiguous"로 남겨두고 나중에 사용자에게 업체명인지 추가설명인지 물어본다.
+  function scanLaneSheet(sheet){
     var range = XLSX.utils.decode_range(sheet['!ref']);
-    var vendors = []; // {name, items:[], row}
+    var lanes = [];
     for (var itemCol = range.s.c; itemCol <= range.e.c; itemCol += 2){
       var qtyCol = itemCol + 1;
-      var cur = null;
+      var lane = [];
       for (var r = range.s.r; r <= range.e.r; r++){
         var itemCell = sheet[XLSX.utils.encode_cell({ r: r, c: itemCol })];
         var qtyCell = sheet[XLSX.utils.encode_cell({ r: r, c: qtyCol })];
@@ -379,16 +425,54 @@
         var qtyV = clean(qtyCell && qtyCell.v);
         if (!itemV || itemV === '품목' || itemV === '수량') continue;
         if (!qtyV || qtyV === '품목' || qtyV === '수량'){
-          cur = { name: itemV, items: [], row: r };
-          vendors.push(cur);
-        } else if (cur) {
-          cur.items.push({ text: itemV, qty: qtyV });
+          var matched = matchVendorName(itemV);
+          if (matched){
+            lane.push({ kind: 'vendor', text: matched, row: r });
+          } else {
+            lane.push({ kind: 'ambiguous', text: itemV, row: r, resolution: looksLikeNoteText(itemV) ? 'note' : 'vendor' });
+          }
+        } else {
+          lane.push({ kind: 'item', text: itemV, qty: qtyV, row: r });
         }
       }
+      if (lane.length) lanes.push(lane);
     }
+    return lanes;
+  }
+
+  // ambiguous 토큰들에 정해진 resolution('vendor' 또는 'note')을 반영해서 최종 업체 목록을 만든다.
+  // 'vendor'로 정하면 거기서부터 새 업체가 시작되고, 'note'로 정하면 바로 위 품목의 추가설명으로 붙는다.
+  function buildVendorsFromLanes(lanes){
+    var vendors = [];
+    lanes.forEach(function(lane){
+      var cur = null;
+      lane.forEach(function(tok){
+        if (tok.kind === 'item'){
+          if (cur) cur.items.push({ text: tok.text, qty: tok.qty });
+        } else if (tok.kind === 'vendor' || (tok.kind === 'ambiguous' && tok.resolution === 'vendor')){
+          cur = { name: tok.text, items: [], row: tok.row };
+          vendors.push(cur);
+        } else if (tok.kind === 'ambiguous' && tok.resolution === 'note'){
+          if (cur && cur.items.length){
+            var last = cur.items[cur.items.length - 1];
+            last.text = last.text + ' (' + tok.text + ')';
+          }
+        }
+      });
+    });
     vendors = vendors.filter(function(v){ return v.items.length > 0; });
     vendors.sort(function(a, b){ return a.row - b.row; });
     return vendors;
+  }
+
+  function collectAmbiguousTokens(laneSheetEntries){
+    var list = [];
+    laneSheetEntries.forEach(function(entry){
+      entry.lanes.forEach(function(lane){
+        lane.forEach(function(tok){ if (tok.kind === 'ambiguous') list.push(tok); });
+      });
+    });
+    return list;
   }
 
   // 제이엘엠 시트: 순번/품목/수량 3칸짜리 표. 거래처 구분이 따로 없고 시트 전체가 그 거래처 하나.
@@ -420,37 +504,80 @@
     return [{ name: vendorName, items: items }];
   }
 
+  function finishExcelLoad(laneSheetEntries, jlmGroups){
+    var groups = jlmGroups.slice();
+    laneSheetEntries.forEach(function(entry){
+      var vendors = buildVendorsFromLanes(entry.lanes);
+      if (vendors.length) groups.push({ groupName: '가락시장', vendors: sortVendorsByVendorList(vendors) });
+    });
+    if (!groups.length){
+      alert('가락시장/제이엘엠 형식의 시트를 찾지 못했어요. 파일을 확인해주세요.');
+      return;
+    }
+    excelGroups = groups;
+    excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
+    excelDetailOpenName = null;
+    saveExcelData(excelGroups);
+    saveExcelPicks(excelPicks);
+    renderExcelList();
+    alert('엑셀에서 불러왔습니다.');
+  }
+
+  // 업체목록에 없는(=애매한) 줄들을 사용자에게 보여주고 "업체명"인지 "추가설명"인지 고르게 한다.
+  // 기본 선택값은 looksLikeNoteText로 대충 미리 골라두고, 사용자가 눌러서 바꿀 수 있게 함.
+  function openAmbiguousResolver(ambiguousTokens, onConfirm){
+    var bodyEl = document.getElementById('excelAmbiguousBody');
+    bodyEl.innerHTML = ambiguousTokens.map(function(tok, i){
+      return '<div class="ambig-row">' +
+        '<div class="atext">' + escapeHtml(tok.text) + '</div>' +
+        '<div class="achoices">' +
+          '<button class="achoice' + (tok.resolution === 'vendor' ? ' picked' : '') + '" data-amb="' + i + '" data-val="vendor">업체명이에요</button>' +
+          '<button class="achoice' + (tok.resolution === 'note' ? ' picked' : '') + '" data-amb="' + i + '" data-val="note">추가설명이에요</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    bodyEl.querySelectorAll('[data-amb]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var idx = +this.dataset.amb;
+        ambiguousTokens[idx].resolution = this.dataset.val;
+        bodyEl.querySelectorAll('[data-amb="' + idx + '"]').forEach(function(bb){
+          bb.classList.toggle('picked', bb.dataset.val === ambiguousTokens[idx].resolution);
+        });
+      });
+    });
+    var modal = document.getElementById('excelAmbiguous');
+    modal.classList.remove('hidden');
+    var confirmBtn = document.getElementById('excelAmbiguousConfirmBtn');
+    confirmBtn.onclick = function(){
+      modal.classList.add('hidden');
+      onConfirm();
+    };
+  }
+
   function handleExcelFile(file){
     var reader = new FileReader();
     reader.onload = function(e){
       try {
         var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-        var groups = [];
+        var laneSheetEntries = []; // [{sheetName, lanes}] — 가락시장류 시트
+        var jlmGroups = [];
         wb.SheetNames.forEach(function(sheetName){
           var sheet = wb.Sheets[sheetName];
           if (!sheet || !sheet['!ref']) return;
           if (sheetName.indexOf('가락') !== -1){
-            var vendors = parseLaneSheet(sheet);
-            if (vendors.length) groups.push({ groupName: '가락시장', vendors: vendors });
+            var lanes = scanLaneSheet(sheet);
+            if (lanes.length) laneSheetEntries.push({ sheetName: sheetName, lanes: lanes });
           } else if (sheetName.indexOf('엘엠') !== -1){
             var jlmVendors = parseSimpleSheet(sheet, sheetName.trim());
-            if (jlmVendors.length) groups.push({ groupName: sheetName.trim(), vendors: jlmVendors });
+            if (jlmVendors.length) jlmGroups.push({ groupName: sheetName.trim(), vendors: jlmVendors });
           }
         });
-        if (!groups.length){
-          alert('가락시장/제이엘엠 형식의 시트를 찾지 못했어요. 파일을 확인해주세요.');
-          return;
+        var ambiguous = collectAmbiguousTokens(laneSheetEntries);
+        if (ambiguous.length){
+          openAmbiguousResolver(ambiguous, function(){ finishExcelLoad(laneSheetEntries, jlmGroups); });
+        } else {
+          finishExcelLoad(laneSheetEntries, jlmGroups);
         }
-        groups.forEach(function(g){
-          if (g.groupName === '가락시장') g.vendors = sortVendorsByVendorList(g.vendors);
-        });
-        excelGroups = groups;
-        excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
-        excelDetailOpenName = null;
-        saveExcelData(excelGroups);
-        saveExcelPicks(excelPicks);
-        renderExcelList();
-        alert('엑셀에서 불러왔습니다.');
       } catch(err){
         alert('엑셀을 읽는 중 문제가 생겼어요: ' + (err && err.message || err));
       }
