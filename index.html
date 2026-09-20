@@ -435,9 +435,35 @@
           lane.push({ kind: 'item', text: itemV, qty: qtyV, row: r });
         }
       }
-      if (lane.length) lanes.push(lane);
+      if (lane.length){
+        markAutoResolvedAmbiguous(lane);
+        lanes.push(lane);
+      }
     }
     return lanes;
+  }
+
+  // 업체목록에 없는(ambiguous) 줄이라도, 그 바로 다음(다음 헤더성 줄이 나오기 전까지)에
+  // 품목(수량 있는 줄)이 하나도 안 따라오면 "업체명"이든 "추가설명"이든 결과가 똑같다
+  // (업체로 잡아도 품목 0개라 자동으로 버려지고, 설명으로 붙일 대상 품목도 이후엔 안 생김).
+  // 그래서 이런 줄(시트 제목, "기타사입" 같은 구분선, 맨 아래 관계없는 목록 등)은 사용자에게
+  // 묻지 않고 조용히 무시(업체명으로 처리 → 품목 0개라 자동 제외)한다.
+  // 진짜로 결과가 달라지는, 뒤에 품목이 딸려오는 줄만 사용자에게 물어본다.
+  function markAutoResolvedAmbiguous(lane){
+    for (var i = 0; i < lane.length; i++){
+      var tok = lane[i];
+      if (tok.kind !== 'ambiguous') continue;
+      var hasFollowingItem = false;
+      for (var j = i + 1; j < lane.length; j++){
+        var nxt = lane[j];
+        if (nxt.kind === 'item'){ hasFollowingItem = true; break; }
+        if (nxt.kind === 'vendor' || nxt.kind === 'ambiguous') break; // 다음 헤더성 줄이 나오면 거기서 멈춤
+      }
+      if (!hasFollowingItem){
+        tok.autoResolved = true;
+        tok.resolution = 'vendor';
+      }
+    }
   }
 
   // ambiguous 토큰들에 정해진 resolution('vendor' 또는 'note')을 반영해서 최종 업체 목록을 만든다.
@@ -469,7 +495,7 @@
     var list = [];
     laneSheetEntries.forEach(function(entry){
       entry.lanes.forEach(function(lane){
-        lane.forEach(function(tok){ if (tok.kind === 'ambiguous') list.push(tok); });
+        lane.forEach(function(tok){ if (tok.kind === 'ambiguous' && !tok.autoResolved) list.push(tok); });
       });
     });
     return list;
