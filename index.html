@@ -453,13 +453,25 @@
     for (var i = 0; i < lane.length; i++){
       var tok = lane[i];
       if (tok.kind !== 'ambiguous') continue;
+
       var hasFollowingItem = false;
       for (var j = i + 1; j < lane.length; j++){
         var nxt = lane[j];
         if (nxt.kind === 'item'){ hasFollowingItem = true; break; }
         if (nxt.kind === 'vendor' || nxt.kind === 'ambiguous') break; // 다음 헤더성 줄이 나오면 거기서 멈춤
       }
-      if (!hasFollowingItem){
+      var hasPrecedingItem = false;
+      for (var k = i - 1; k >= 0; k--){
+        var prev = lane[k];
+        if (prev.kind === 'item'){ hasPrecedingItem = true; break; }
+        if (prev.kind === 'vendor' || prev.kind === 'ambiguous') break; // 그 전 헤더성 줄까지만 확인
+      }
+
+      // 미리 찍어둔 기본 추측(추가설명 vs 업체명)에 따라, 실제로 결과가 달라지는 경우에만 물어본다.
+      // - "추가설명"으로 보이는데 붙일 품목이 바로 위에 없으면 → 어차피 아무 효과 없음 → 조용히 무시
+      // - "업체명"으로 보이는데 뒤에 딸려올 품목이 없으면 → 어차피 품목 0개로 자동 제외됨 → 조용히 무시
+      var matters = (tok.resolution === 'note') ? hasPrecedingItem : hasFollowingItem;
+      if (!matters){
         tok.autoResolved = true;
         tok.resolution = 'vendor';
       }
