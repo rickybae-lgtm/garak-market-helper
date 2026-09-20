@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>가락시장 사입 도우미</title>
+<style>
+  :root{
+    --bg:#0b1220; --surface:#121b2e; --surface-2:#1a2540; --line:#25324f;
+    --ink:#eef2ff; --sub:#93a2c2; --accent:#4f8cff; --accent-ink:#08122b; --danger:#ff6b6b;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  body{ padding-bottom:24px; }
+  h1{ font-size:18px; text-align:center; padding:14px 10px 10px; margin:0; }
+  .wrap{ max-width:640px; margin:0 auto; padding:0 12px; }
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--ink); border-radius:12px; padding:12px 14px; font-size:15px; font-weight:700;
+    cursor:pointer; }
+  .btn.accent{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .btn.danger{ background:transparent; color:var(--danger); border-color:var(--danger); }
+  .btn.block{ width:100%; }
+  .btn.sm{ padding:8px 10px; font-size:13px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  input[type=text]{ width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink);
+    border-radius:10px; padding:11px 12px; font-size:15px; }
+  .vendor-item{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:12px; padding:10px 10px; margin-bottom:8px; opacity:0.68; }
+  .phone-row{ flex-basis:100%; display:flex; gap:6px; margin-top:2px; }
+  .phone-row input{ flex:1; background:var(--surface); border:1px solid var(--line); color:var(--ink);
+    border-radius:10px; padding:9px 10px; font-size:14px; }
+  .vendor-item .name{ flex:1; font-weight:700; font-size:15px; }
+  .vendor-item .status{ font-size:12px; color:var(--sub); }
+  .vendor-item.done{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); opacity:1; }
+  .vendor-item.done .status{ color:var(--accent); }
+  .badge-dot{ width:22px; height:22px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center;
+    justify-content:center; font-size:13px; background:var(--surface); border:1px solid var(--line); }
+  .vendor-item.done .badge-dot{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .order-arrows{ display:flex; flex-direction:column; gap:2px; }
+  .order-arrows button{ background:none; border:none; color:var(--sub); font-size:14px; cursor:pointer; padding:2px 4px; }
+  .hidden{ display:none !important; }
+  .empty{ color:var(--sub); font-size:14px; text-align:center; padding:16px 0; }
+  #cropStage{ position:relative; width:100%; max-height:65vh; overflow:auto; -webkit-overflow-scrolling:touch;
+    border-radius:12px; background:#000; margin-top:10px; }
+  #cropWrap{ position:relative; }
+  #cropWrap img{ display:block; width:100%; height:auto; user-select:none; -webkit-user-drag:none; }
+  #cropBox{ position:absolute; border:2px solid var(--accent); background:rgba(79,140,255,0.18); display:none; pointer-events:none; }
+  #cropDot{ position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 0 4px rgba(255,255,255,0.5); display:none; pointer-events:none; }
+  .crop-handle{ position:absolute; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%;
+    background:var(--accent); border:3px solid #fff; display:none; z-index:5; touch-action:none; }
+  .zoom-hint{ font-size:12px; color:var(--sub); margin:2px 0 8px; }
+  .viewer-body{ touch-action:none; }
+  .viewer-body-inner{ transform-origin:0 0; }
+  .viewer{ position:fixed; inset:0; background:#000; z-index:50; display:flex; flex-direction:column; }
+  .viewer-top{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
+    background:#0b1220; border-bottom:1px solid var(--line); }
+  .viewer-top .vname{ font-size:17px; font-weight:800; }
+  .viewer-top .idx{ font-size:12px; color:var(--sub); }
+  .viewer-body{ flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#000; }
+  .viewer-body img{ width:100%; height:auto; display:block; transform-origin:center center; will-change:transform; }
+  .viewer-nav{ display:flex; gap:10px; padding:10px 12px; background:#0b1220; border-top:1px solid var(--line); }
+  .viewer-nav .btn{ flex:1; font-size:20px; padding:14px; }
+  .step-title{ font-size:13px; color:var(--sub); font-weight:700; margin-bottom:8px; }
+  .top-actions{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+  #toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#1a2540;
+    border:1px solid var(--accent); color:var(--ink); padding:12px 16px; border-radius:12px; font-size:14px;
+    max-width:86%; text-align:center; z-index:100; opacity:0; pointer-events:none; transition:opacity .2s; }
+  #toast.show{ opacity:1; }
+  .excel-vendor{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px 10px; margin-bottom:8px; }
+  .excel-vendor .name{ font-weight:800; font-size:15px; margin-bottom:6px; }
+  .excel-item{ display:flex; align-items:flex-start; gap:8px; padding:6px 2px; border-top:1px solid var(--line); }
+  .excel-item:first-of-type{ border-top:none; }
+  .excel-item input[type=checkbox]{ width:20px; height:20px; margin-top:1px; flex:none; }
+  .excel-item .itext{ flex:1; font-size:14px; }
+  .excel-item.picked .itext{ text-decoration:line-through; color:var(--sub); }
+  .excel-item .qty{ font-size:14px; color:var(--sub); flex:none; }
+  .excel-item.qty-warn .qty{ color:var(--danger); font-weight:800; }
+  .excel-item.qty-warn .itext{ font-weight:800; }
+  .excel-summary{ font-size:12px; color:var(--sub); margin:4px 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🥬 가락시장 사입 도우미</h1>
+
+  <div class="card" id="excelCard">
+    <div class="step-title">0. 엑셀 파일로 자동 불러오기 (있으면 이걸로)</div>
+    <input type="file" id="excelInput" accept=".xlsx,.xls,.xlsm">
+    <div id="excelSummary" class="excel-summary"></div>
+    <div id="excelList"></div>
+  </div>
+
+  <div class="card" id="uploadCard">
+    <div class="step-title">1. 오늘 받은 사입 목록 사진 (엑셀이 없을 때)</div>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+    <div id="imgTabs" class="row" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card hidden" id="cropCard">
+    <div class="step-title">2. 거래처 자리 표시하기</div>
+    <div class="zoom-hint">두 손가락으로 오므리고 펴서 확대/축소 가능 · 표에서 <b>왼쪽 위</b> 콕, <b>오른쪽 아래</b> 콕 (두 번 터치) · 찍은 후엔 파란 점을 끌어서 미세 조정 가능</div>
+    <div class="row" style="margin-bottom:8px;">
+      <button class="btn sm" id="zoom100Btn">100%</button>
+      <button class="btn sm" id="zoom160Btn">160%</button>
+      <button class="btn sm" id="zoom220Btn">220%</button>
+      <button class="btn sm" id="cropResetPointsBtn">다시 찍기</button>
+    </div>
+    <div id="cropStage">
+      <div id="cropWrap">
+        <img id="cropImg">
+        <div id="cropBox"></div>
+        <div id="cropDot"></div>
+        <div id="cropHandleTL" class="crop-handle"></div>
+        <div id="cropHandleBR" class="crop-handle"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn sm" id="cropCancelBtn">취소</button>
+      <button class="btn accent sm" id="cropSaveBtn">이 자리로 저장</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" id="addVendorRow" style="margin-bottom:10px;">
+      <input type="text" id="addVendorInput" placeholder="새 거래처 이름" style="flex:1;">
+      <button class="btn accent sm" id="addVendorBtn">추가</button>
+    </div>
+    <div id="vendorSummary" class="zoom-hint"></div>
+    <div id="vendorList"></div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn accent block" id="startViewerBtn">📖 순서대로 보기 시작</button>
+    </div>
+  </div>
+</div>
+
+<div class="viewer hidden" id="viewer">
+  <div class="viewer-top">
+    <div><div class="vname" id="viewerName"></div><div class="idx" id="viewerIdx"></div></div>
+    <button class="btn sm" id="viewerCloseBtn">닫기</button>
+  </div>
+  <div class="viewer-body" id="viewerBody">
+    <img id="viewerImg">
+  </div>
+  <div class="viewer-nav">
+    <button class="btn" id="viewerPrevBtn">‹ 이전</button>
+    <button class="btn" id="viewerNextBtn">다음 ›</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+  function alert(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2400);
+  }
+
+  function todayStr(){ return new Date().toDateString(); }
+
+  var VENDOR_KEY = 'garak.vendorOrder.v1';
+  var CROPS_KEY = 'garak.crops.v1';
+  var DATE_KEY = 'garak.date.v1';
+  var PHONE_KEY = 'garak.vendorPhones.v1';
+
+  function loadPhones(){
+    try { return JSON.parse(localStorage.getItem(PHONE_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function savePhones(map){
+    try { localStorage.setItem(PHONE_KEY, JSON.stringify(map)); } catch(e){}
+  }
+
+  function loadVendorOrder(){
+    try { return JSON.parse(localStorage.getItem(VENDOR_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveVendorOrder(list){
+    try { localStorage.setItem(VENDOR_KEY, JSON.stringify(list)); } catch(e){}
+  }
+  function loadCrops(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return {};
+    try { return JSON.parse(localStorage.getItem(CROPS_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveCrops(map){
+    try {
+      localStorage.setItem(CROPS_KEY, JSON.stringify(map));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){
+      // 용량 초과 등으로 저장 실패해도 화면 동작에는 지장 없게 조용히 무시함.
+    }
+  }
+
+  // 올린 원본 사진도 임시로 저장해둠 — 폰 브라우저가 메모리 때문에 화면을 새로고침해서
+  // "사진이 사라지는" 경우를 대비한 것. 용량을 줄이기 위해 살짝 압축해서 저장함.
+  var SRC_KEY = 'garak.sourceImages.v1';
+  function loadSourceImagesStorage(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return [];
+    try { return JSON.parse(localStorage.getItem(SRC_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveSourceImagesStorage(){
+    try {
+      var list = sourceImages.map(function(s){ return s.storedDataUrl; }).filter(Boolean);
+      localStorage.setItem(SRC_KEY, JSON.stringify(list));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){
+      // 사진이 커서 저장 공간이 부족하면 조용히 실패시킴 (지금 화면에서 쓰는 덴 지장 없음).
+    }
+  }
+  function makeStoredDataUrl(img){
+    var maxW = 1600;
+    var scale = Math.min(1, maxW / img.naturalWidth);
+    var w = Math.max(1, Math.round(img.naturalWidth * scale));
+    var h = Math.max(1, Math.round(img.naturalHeight * scale));
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+
+  var vendorOrder = loadVendorOrder(); // ["다농마트","우주식품", ...]
+  var vendorPhones = loadPhones(); // { "다농마트": "0224070450", ... }
+  var editingPhoneIndex = null;
+  var crops = loadCrops(); // { "다농마트": {dataUrl, srcIndex}, ... }
+  var sourceImages = []; // [{img, url}] 오늘 올린 원본 사진들
+  var currentSourceIndex = 0;
+  var pendingVendorName = null;
+
+  // ---------- 엑셀 파일로 자동 불러오기 ----------
+  // 회사에서 보내주는 발주서 엑셀(가락시장 시트: A/C/E열에 거래처명, 바로 오른쪽 칸에 수량이
+  // 있으면 품목, 없으면 새 거래처 이름 / 제이엘엠 시트: 순번·품목·수량 3칸)을 그대로 읽어서
+  // 거래처별 품목 목록을 자동으로 만들어준다. 사진 자르기 작업을 통째로 건너뛸 수 있음.
+  var EXCEL_DATA_KEY = 'garak.excelData.v1';
+  var EXCEL_PICK_KEY = 'garak.excelPicks.v1';
+  function loadExcelData(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return null;
+    try { return JSON.parse(localStorage.getItem(EXCEL_DATA_KEY) || 'null'); } catch(e){ return null; }
+  }
+  function saveExcelData(data){
+    try {
+      localStorage.setItem(EXCEL_DATA_KEY, JSON.stringify(data));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){}
+  }
+  function loadExcelPicks(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return {};
+    try { return JSON.parse(localStorage.getItem(EXCEL_PICK_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveExcelPicks(map){
+    try { localStorage.setItem(EXCEL_PICK_KEY, JSON.stringify(map)); } catch(e){}
+  }
+
+  var excelGroups = loadExcelData(); // [{groupName, vendors:[{name, items:[{text, qty}]}]}]
+  var excelPicks = loadExcelPicks(); // { "거래처명||품목명": true }
+
+  function clean(v){ return (v === null || v === undefined) ? '' : String(v).trim(); }
+
+  // 가락시장 시트: A,C,E(그리고 있으면 그 뒤로도 두 칸씩)를 각각 하나의 "레인"으로 보고,
+  // 레인 안에서 위->아래로 훑으면서, 옆칸(수량)이 비어있으면 "새 거래처 이름"으로, 옆칸에
+  // 뭔가 적혀 있으면 "그 거래처의 품목"으로 본다. 품목이 하나도 안 붙은 거래처(빈 구분선,
+  // 이름만 있고 아직 안 적힌 곳 등)는 자동으로 걸러진다.
+  function parseLaneSheet(sheet){
+    var range = XLSX.utils.decode_range(sheet['!ref']);
+    var vendors = []; // {name, items:[], row}
+    for (var itemCol = range.s.c; itemCol <= range.e.c; itemCol += 2){
+      var qtyCol = itemCol + 1;
+      var cur = null;
+      for (var r = range.s.r; r <= range.e.r; r++){
+        var itemCell = sheet[XLSX.utils.encode_cell({ r: r, c: itemCol })];
+        var qtyCell = sheet[XLSX.utils.encode_cell({ r: r, c: qtyCol })];
+        var itemV = clean(itemCell && itemCell.v);
+        var qtyV = clean(qtyCell && qtyCell.v);
+        if (!itemV || itemV === '품목' || itemV === '수량') continue;
+        if (!qtyV || qtyV === '품목' || qtyV === '수량'){
+          cur = { name: itemV, items: [], row: r };
+          vendors.push(cur);
+        } else if (cur) {
+          cur.items.push({ text: itemV, qty: qtyV });
+        }
+      }
+    }
+    vendors = vendors.filter(function(v){ return v.items.length > 0; });
+    vendors.sort(function(a, b){ return a.row - b.row; });
+    return vendors;
+  }
+
+  // 제이엘엠 시트: 순번/품목/수량 3칸짜리 표. 거래처 구분이 따로 없고 시트 전체가 그 거래처 하나.
+  function parseSimpleSheet(sheet, vendorName){
+    var range = XLSX.utils.decode_range(sheet['!ref']);
+    var items = [];
+    for (var r = range.s.r; r <= range.e.r; r++){
+      // 순번(첫 칸), 품목, 수량 순서로 되어있다고 보고 각 행에서 텍스트가 있는 칸과 그 다음 칸을 품목/수량으로 씀.
+      var rowVals = [];
+      for (var c = range.s.c; c <= range.e.c; c++){
+        var cell = sheet[XLSX.utils.encode_cell({ r: r, c: c })];
+        rowVals.push(clean(cell && cell.v));
+      }
+      // 순번(숫자)칸 다음의 첫 텍스트를 품목으로, 그 다음 비지 않은 칸을 수량으로 봄.
+      var HEADER_WORDS = ['품목', '수량', '순번'];
+      var itemText = '', qtyText = '';
+      for (var i = 0; i < rowVals.length; i++){
+        if (rowVals[i] && !/^\d+$/.test(rowVals[i]) && HEADER_WORDS.indexOf(rowVals[i]) === -1){
+          itemText = rowVals[i];
+          for (var j = i + 1; j < rowVals.length; j++){
+            if (rowVals[j] && HEADER_WORDS.indexOf(rowVals[j]) === -1) { qtyText = rowVals[j]; break; }
+          }
+          break;
+        }
+      }
+      if (itemText && qtyText) items.push({ text: itemText, qty: qtyText });
+    }
+    if (!items.length) return [];
+    return [{ name: vendorName, items: items }];
+  }
+
+  function handleExcelFile(file){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        var groups = [];
+        wb.SheetNames.forEach(function(sheetName){
+          var sheet = wb.Sheets[sheetName];
+          if (!sheet || !sheet['!ref']) return;
+          if (sheetName.indexOf('가락') !== -1){
+            var vendors = parseLaneSheet(sheet);
+            if (vendors.length) groups.push({ groupName: '가락시장', vendors: vendors });
+          } else if (sheetName.indexOf('엘엠') !== -1){
+            var jlmVendors = parseSimpleSheet(sheet, sheetName.trim());
+            if (jlmVendors.length) groups.push({ groupName: sheetName.trim(), vendors: jlmVendors });
+          }
+        });
+        if (!groups.length){
+          alert('가락시장/제이엘엠 형식의 시트를 찾지 못했어요. 파일을 확인해주세요.');
+          return;
+        }
+        excelGroups = groups;
+        excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
+        saveExcelData(excelGroups);
+        saveExcelPicks(excelPicks);
+        renderExcelList();
+        alert('엑셀에서 불러왔습니다.');
+      } catch(err){
+        alert('엑셀을 읽는 중 문제가 생겼어요: ' + (err && err.message || err));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function pickKey(vendorName, itemText){ return vendorName + '||' + itemText; }
+
+  function renderExcelList(){
+    var listEl = document.getElementById('excelList');
+    var summaryEl = document.getElementById('excelSummary');
+    listEl.innerHTML = '';
+    if (!excelGroups || !excelGroups.length){
+      summaryEl.textContent = '';
+      return;
+    }
+    var totalItems = 0, pickedItems = 0;
+    excelGroups.forEach(function(group){
+      group.vendors.forEach(function(v){
+        v.items.forEach(function(it){
+          totalItems++;
+          if (excelPicks[pickKey(v.name, it.text)]) pickedItems++;
+        });
+      });
+    });
+    summaryEl.textContent = '픽킹 완료 ' + pickedItems + ' / 전체 ' + totalItems + '개 품목';
+
+    excelGroups.forEach(function(group){
+      var groupTitle = document.createElement('div');
+      groupTitle.className = 'step-title';
+      groupTitle.style.marginTop = '10px';
+      groupTitle.textContent = group.groupName;
+      listEl.appendChild(groupTitle);
+
+      group.vendors.forEach(function(v){
+        var card = document.createElement('div');
+        card.className = 'excel-vendor';
+        var itemsHtml = v.items.map(function(it){
+          var qtyNum = parseInt(it.qty, 10);
+          var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
+          var key = pickKey(v.name, it.text);
+          var picked = !!excelPicks[key];
+          return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
+            '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
+            '<span class="itext">' + escapeHtml(it.text) + '</span>' +
+            '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
+            '</label>';
+        }).join('');
+        card.innerHTML = '<div class="name">' + escapeHtml(v.name) + '</div>' + itemsHtml;
+        listEl.appendChild(card);
+      });
+    });
+
+    listEl.querySelectorAll('[data-pickkey]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        if (this.checked) excelPicks[this.dataset.pickkey] = true; else delete excelPicks[this.dataset.pickkey];
+        saveExcelPicks(excelPicks);
+        renderExcelList();
+      });
+    });
+  }
+
+  document.getElementById('excelInput').addEventListener('change', function(){
+    if (this.files && this.files[0]) handleExcelFile(this.files[0]);
+  });
+  renderExcelList();
+
+  var fileInput = document.getElementById('fileInput');
+  var imgTabs = document.getElementById('imgTabs');
+  var cropCard = document.getElementById('cropCard');
+  var cropStage = document.getElementById('cropStage');
+  var cropImg = document.getElementById('cropImg');
+  var cropBox = document.getElementById('cropBox');
+  var vendorListEl = document.getElementById('vendorList');
+
+  function renderImgTabs(){
+    imgTabs.innerHTML = '';
+    if (!sourceImages.length) return;
+    sourceImages.forEach(function(_, i){
+      var wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '4px';
+      var b = document.createElement('button');
+      b.className = 'btn sm' + (i === currentSourceIndex ? ' accent' : '');
+      b.textContent = '사진 ' + (i + 1);
+      b.addEventListener('click', function(){ currentSourceIndex = i; renderImgTabs(); });
+      var del = document.createElement('button');
+      del.className = 'btn sm danger';
+      del.textContent = '삭제';
+      del.addEventListener('click', function(){
+        try { URL.revokeObjectURL(sourceImages[i].url); } catch(e){}
+        sourceImages.splice(i, 1);
+        if (currentSourceIndex >= sourceImages.length) currentSourceIndex = Math.max(0, sourceImages.length - 1);
+        saveSourceImagesStorage();
+        renderImgTabs();
+        renderVendorList();
+      });
+      wrap.appendChild(b); wrap.appendChild(del);
+      imgTabs.appendChild(wrap);
+    });
+  }
+
+  fileInput.addEventListener('change', function(){
+    var files = Array.prototype.slice.call(fileInput.files || []);
+    if (!files.length) return;
+    var loaded = 0;
+    files.forEach(function(f){
+      var url = URL.createObjectURL(f);
+      var im = new Image();
+      im.onload = function(){
+        sourceImages.push({ img: im, url: url, storedDataUrl: makeStoredDataUrl(im) });
+        loaded++;
+        if (loaded === files.length){
+          currentSourceIndex = sourceImages.length - files.length;
+          renderImgTabs();
+          renderVendorList();
+          saveSourceImagesStorage();
+        }
+      };
+      im.src = url;
+    });
+    fileInput.value = '';
+  });
+
+  // 새로고침/백그라운드 등으로 화면이 초기화됐을 때, 오늘 올렸던 사진이 저장돼 있으면 복구함.
+  (function restoreSourceImages(){
+    var stored = loadSourceImagesStorage();
+    if (!stored.length) return;
+    var loaded = 0;
+    stored.forEach(function(dataUrl){
+      var im = new Image();
+      im.onload = function(){
+        sourceImages.push({ img: im, url: dataUrl, storedDataUrl: dataUrl });
+        loaded++;
+        if (loaded === stored.length){
+          currentSourceIndex = 0;
+          renderImgTabs();
+          renderVendorList();
+        }
+      };
+      im.src = dataUrl;
+    });
+  })();
+
+  // ---------- 거래처 목록 ----------
+  function renderVendorList(){
+    vendorListEl.innerHTML = '';
+    var summaryEl = document.getElementById('vendorSummary');
+    if (!vendorOrder.length){
+      vendorListEl.innerHTML = '<div class="empty">거래처를 추가해주세요.</div>';
+      if (summaryEl) summaryEl.textContent = '';
+      return;
+    }
+    if (summaryEl){
+      var doneCount = vendorOrder.filter(function(n){ return !!crops[n]; }).length;
+      summaryEl.textContent = '✓ 표시 완료 ' + doneCount + ' / 안 한 곳 ' + (vendorOrder.length - doneCount);
+    }
+    vendorOrder.forEach(function(name, i){
+      var has = !!crops[name];
+      var phone = vendorPhones[name] || '';
+      var row = document.createElement('div');
+      row.className = 'vendor-item' + (has ? ' done' : '');
+      var phoneHtml;
+      if (editingPhoneIndex === i){
+        phoneHtml = '<div class="phone-row">' +
+          '<input type="tel" id="phoneInput' + i + '" value="' + escapeHtml(phone) + '" placeholder="예: 0224070450">' +
+          (contactsPickerSupported() ? '<button class="btn sm" data-frompicker="' + i + '">📇 연락처</button>' : '') +
+          '<button class="btn sm accent" data-savephone="' + i + '">저장</button>' +
+          '<button class="btn sm" data-cancelphone="' + i + '">취소</button>' +
+          '</div>';
+      } else {
+        phoneHtml = '<div class="phone-row">' +
+          (phone
+            ? '<a class="btn sm accent" href="tel:' + escapeHtml(phone) + '">📞 ' + escapeHtml(phone) + '</a><button class="btn sm" data-editphone="' + i + '">번호수정</button>'
+            : '<button class="btn sm" data-editphone="' + i + '">☎ 전화번호 추가</button>') +
+          '</div>';
+      }
+      row.innerHTML =
+        '<div class="order-arrows">' +
+          '<button data-up="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>▲</button>' +
+          '<button data-down="' + i + '" ' + (i === vendorOrder.length - 1 ? 'disabled' : '') + '>▼</button>' +
+        '</div>' +
+        '<div class="badge-dot">' + (has ? '✓' : '') + '</div>' +
+        '<div class="name">' + escapeHtml(name) + '<div class="status">' + (has ? '자리 표시됨' : (sourceImages.length ? '아직 안 함' : '오늘 사진부터 올려주세요')) + '</div></div>' +
+        (has ? '<button class="btn sm accent" data-view="' + i + '">보기</button>' : '') +
+        '<button class="btn sm" data-mark="' + i + '" ' + (sourceImages.length ? '' : 'disabled') + '>' + (has ? '다시 그리기' : '자리 표시') + '</button>' +
+        '<button class="btn sm danger" data-del="' + i + '">삭제</button>' +
+        phoneHtml;
+      vendorListEl.appendChild(row);
+    });
+
+    vendorListEl.querySelectorAll('[data-mark]').forEach(function(b){
+      b.addEventListener('click', function(){ startCrop(vendorOrder[+this.dataset.mark]); });
+    });
+    vendorListEl.querySelectorAll('[data-view]').forEach(function(b){
+      b.addEventListener('click', function(){ openViewerAt(vendorOrder[+this.dataset.view]); });
+    });
+    vendorListEl.querySelectorAll('[data-editphone]').forEach(function(b){
+      b.addEventListener('click', function(){
+        editingPhoneIndex = +this.dataset.editphone;
+        renderVendorList();
+        var inp = document.getElementById('phoneInput' + editingPhoneIndex);
+        if (inp) inp.focus();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-cancelphone]').forEach(function(b){
+      b.addEventListener('click', function(){ editingPhoneIndex = null; renderVendorList(); });
+    });
+    vendorListEl.querySelectorAll('[data-savephone]').forEach(function(b){
+      b.addEventListener('click', savePhoneFromRow);
+    });
+    vendorListEl.querySelectorAll('[data-frompicker]').forEach(function(b){
+      b.addEventListener('click', function(){ pickContactPhone(+this.dataset.frompicker); });
+    });
+    vendorListEl.querySelectorAll('.phone-row input').forEach(function(inp){
+      inp.addEventListener('keydown', function(evt){
+        if (evt.key === 'Enter'){ evt.preventDefault(); savePhoneFromRow.call(vendorListEl.querySelector('[data-savephone="' + editingPhoneIndex + '"]')); }
+      });
+    });
+    vendorListEl.querySelectorAll('[data-del]').forEach(function(b){
+      b.addEventListener('click', function(){
+        if (this.dataset.armed !== '1'){
+          this.dataset.armed = '1';
+          this.textContent = '한번 더 누르면 삭제';
+          setTimeout(function(){ b.dataset.armed = '0'; b.textContent = '삭제'; }, 3000);
+          return;
+        }
+        var name = vendorOrder[+this.dataset.del];
+        vendorOrder.splice(+this.dataset.del, 1);
+        delete crops[name];
+        saveVendorOrder(vendorOrder); saveCrops(crops); renderVendorList();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-up]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var i = +this.dataset.up;
+        var tmp = vendorOrder[i - 1]; vendorOrder[i - 1] = vendorOrder[i]; vendorOrder[i] = tmp;
+        saveVendorOrder(vendorOrder); renderVendorList();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-down]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var i = +this.dataset.down;
+        var tmp = vendorOrder[i + 1]; vendorOrder[i + 1] = vendorOrder[i]; vendorOrder[i] = tmp;
+        saveVendorOrder(vendorOrder); renderVendorList();
+      });
+    });
+  }
+
+  function savePhoneFromRow(){
+    var i = +this.dataset.savephone;
+    var name = vendorOrder[i];
+    var inp = document.getElementById('phoneInput' + i);
+    var val = (inp && inp.value || '').trim();
+    if (val) vendorPhones[name] = val; else delete vendorPhones[name];
+    savePhones(vendorPhones);
+    editingPhoneIndex = null;
+    renderVendorList();
+  }
+
+  // 안드로이드 크롬 등 일부 브라우저는 연락처에서 바로 전화번호를 가져올 수 있음(iOS 사파리는 미지원).
+  function contactsPickerSupported(){
+    return !!(navigator.contacts && navigator.contacts.select && window.isSecureContext);
+  }
+  function pickContactPhone(i){
+    navigator.contacts.select(['tel', 'name'], { multiple: false }).then(function(contacts){
+      if (contacts && contacts.length && contacts[0].tel && contacts[0].tel.length){
+        var inp = document.getElementById('phoneInput' + i);
+        if (inp) inp.value = contacts[0].tel[0];
+      }
+    }).catch(function(){
+      // 사용자가 취소했거나 지원되지 않는 경우 — 조용히 무시하고 직접 입력하게 둠.
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s || '').replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  var addVendorInput = document.getElementById('addVendorInput');
+  function addVendorFromInput(){
+    var name = (addVendorInput.value || '').trim();
+    if (!name) return;
+    if (vendorOrder.indexOf(name) !== -1){ alert('이미 있는 거래처예요.'); return; }
+    vendorOrder.push(name);
+    saveVendorOrder(vendorOrder);
+    addVendorInput.value = '';
+    renderVendorList();
+  }
+  document.getElementById('addVendorBtn').addEventListener('click', addVendorFromInput);
+  addVendorInput.addEventListener('keydown', function(evt){
+    if (evt.key === 'Enter'){ evt.preventDefault(); addVendorFromInput(); }
+  });
+
+  // ---------- 자리(영역) 표시 (두 번 터치: 왼쪽위 콕 -> 오른쪽아래 콕) ----------
+  var cropWrap = document.getElementById('cropWrap');
+  var cropDot = document.getElementById('cropDot');
+  var zoomLevel = 1;
+  var points = [];
+
+  function applyZoom(){
+    var baseW = cropStage.clientWidth;
+    cropWrap.style.width = Math.round(baseW * zoomLevel) + 'px';
+  }
+  function setZoomBtnActive(){
+    ['zoom100Btn','zoom160Btn','zoom220Btn'].forEach(function(id){
+      document.getElementById(id).classList.remove('accent');
+    });
+    var map = { 1: 'zoom100Btn', 1.6: 'zoom160Btn', 2.2: 'zoom220Btn' };
+    var btn = document.getElementById(map[zoomLevel]);
+    if (btn) btn.classList.add('accent');
+  }
+  document.getElementById('zoom100Btn').addEventListener('click', function(){ zoomLevel = 1; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('zoom160Btn').addEventListener('click', function(){ zoomLevel = 1.6; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('zoom220Btn').addEventListener('click', function(){ zoomLevel = 2.2; applyZoom(); setZoomBtnActive(); });
+  document.getElementById('cropResetPointsBtn').addEventListener('click', resetPoints);
+
+  var cropHandleTL = document.getElementById('cropHandleTL');
+  var cropHandleBR = document.getElementById('cropHandleBR');
+  var boxRect = null; // { x0,y0,x1,y1 } — 두 점 찍은 후 손잡이로 미세조정할 때 씀
+
+  function resetPoints(){
+    points = [];
+    boxRect = null;
+    cropDot.style.display = 'none';
+    cropBox.style.display = 'none';
+    cropHandleTL.style.display = 'none';
+    cropHandleBR.style.display = 'none';
+  }
+
+  function touchDistance(touches){
+    var dx = touches[0].clientX - touches[1].clientX;
+    var dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // 두 손가락으로 오므리고 펴서 확대/축소
+  var pinchStartDist = null, pinchStartZoom = 1;
+  cropWrap.addEventListener('touchstart', function(evt){
+    if (evt.touches.length === 2){
+      pinchStartDist = touchDistance(evt.touches);
+      pinchStartZoom = zoomLevel;
+    }
+  }, { passive: true });
+  cropWrap.addEventListener('touchmove', function(evt){
+    if (evt.touches.length === 2 && pinchStartDist){
+      evt.preventDefault();
+      var d = touchDistance(evt.touches);
+      zoomLevel = Math.max(1, Math.min(3, pinchStartZoom * (d / pinchStartDist)));
+      applyZoom();
+      setZoomBtnActive();
+    }
+  }, { passive: false });
+  cropWrap.addEventListener('touchend', function(evt){
+    if (evt.touches.length < 2) pinchStartDist = null;
+  });
+
+  function drawBoxFromRect(){
+    var x0 = Math.min(boxRect.x0, boxRect.x1), y0 = Math.min(boxRect.y0, boxRect.y1);
+    var x1 = Math.max(boxRect.x0, boxRect.x1), y1 = Math.max(boxRect.y0, boxRect.y1);
+    cropBox.style.left = x0 + 'px'; cropBox.style.top = y0 + 'px';
+    cropBox.style.width = (x1 - x0) + 'px'; cropBox.style.height = (y1 - y0) + 'px';
+    cropHandleTL.style.left = boxRect.x0 + 'px'; cropHandleTL.style.top = boxRect.y0 + 'px';
+    cropHandleBR.style.left = boxRect.x1 + 'px'; cropHandleBR.style.top = boxRect.y1 + 'px';
+  }
+
+  function bindHandleDrag(handleEl, isTL){
+    function getPoint(evt){
+      var rect = cropWrap.getBoundingClientRect();
+      var t = (evt.touches && evt.touches[0]) || (evt.changedTouches && evt.changedTouches[0]) || evt;
+      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    }
+    function onMove(evt){
+      evt.preventDefault();
+      var p = getPoint(evt);
+      if (isTL){ boxRect.x0 = p.x; boxRect.y0 = p.y; } else { boxRect.x1 = p.x; boxRect.y1 = p.y; }
+      drawBoxFromRect();
+    }
+    function onEnd(){
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+    }
+    handleEl.addEventListener('mousedown', function(evt){
+      evt.stopPropagation(); evt.preventDefault();
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onEnd);
+    });
+    handleEl.addEventListener('touchstart', function(evt){
+      evt.stopPropagation();
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+    }, { passive: true });
+  }
+  bindHandleDrag(cropHandleTL, true);
+  bindHandleDrag(cropHandleBR, false);
+
+  function startCrop(vendorName){
+    if (!sourceImages.length){ alert('먼저 사진을 올려주세요.'); return; }
+    pendingVendorName = vendorName;
+    var src = sourceImages[currentSourceIndex];
+    cropImg.src = src.url;
+    resetPoints();
+    zoomLevel = 1;
+    setZoomBtnActive();
+    cropCard.classList.remove('hidden');
+    cropCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    requestAnimationFrame(applyZoom);
+  }
+
+  function onStageTap(evt){
+    if (!pendingVendorName) return;
+    var rect = cropWrap.getBoundingClientRect();
+    var t = (evt.changedTouches && evt.changedTouches[0]) || evt;
+    var x = t.clientX - rect.left, y = t.clientY - rect.top;
+    if (points.length >= 2) resetPoints();
+    points.push({ x: x, y: y });
+    if (points.length === 1){
+      cropDot.style.left = x + 'px'; cropDot.style.top = y + 'px'; cropDot.style.display = 'block';
+      cropBox.style.display = 'none';
+    } else {
+      cropDot.style.display = 'none';
+      boxRect = { x0: points[0].x, y0: points[0].y, x1: points[1].x, y1: points[1].y };
+      drawBoxFromRect();
+      cropBox.style.display = 'block';
+      cropHandleTL.style.display = 'block';
+      cropHandleBR.style.display = 'block';
+    }
+  }
+  // 'click'은 터치/마우스 둘 다에서 발생하므로(드래그 없이) 이거 하나로 충분함.
+  cropWrap.addEventListener('click', onStageTap);
+
+  document.getElementById('cropCancelBtn').addEventListener('click', function(){
+    pendingVendorName = null;
+    cropCard.classList.add('hidden');
+  });
+
+  document.getElementById('cropSaveBtn').addEventListener('click', function(){
+    if (points.length < 2 || !boxRect){
+      alert('왼쪽 위, 오른쪽 아래 두 번 콕 짚어주세요.');
+      return;
+    }
+    var x0 = Math.min(boxRect.x0, boxRect.x1), y0 = Math.min(boxRect.y0, boxRect.y1);
+    var w = Math.abs(boxRect.x1 - boxRect.x0), h = Math.abs(boxRect.y1 - boxRect.y0);
+    if (w < 10 || h < 10){
+      alert('선택한 영역이 너무 작아요. 다시 찍어주세요.');
+      return;
+    }
+    var src = sourceImages[currentSourceIndex];
+    var scale = src.img.naturalWidth / cropWrap.clientWidth;
+    var sx = x0 * scale, sy = y0 * scale, sw = w * scale, sh = h * scale;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(src.img, sx, sy, sw, sh, 0, 0, sw, sh);
+    var dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    crops[pendingVendorName] = { dataUrl: dataUrl };
+    saveCrops(crops);
+
+    pendingVendorName = null;
+    cropCard.classList.add('hidden');
+    renderVendorList();
+  });
+
+  // ---------- 순서대로 보기 (뷰어) ----------
+  var viewer = document.getElementById('viewer');
+  var viewerImg = document.getElementById('viewerImg');
+  var viewerName = document.getElementById('viewerName');
+  var viewerIdx = document.getElementById('viewerIdx');
+  var viewerBody = document.getElementById('viewerBody');
+  var viewList = [];
+  var viewPos = 0;
+
+  document.getElementById('startViewerBtn').addEventListener('click', function(){
+    viewList = vendorOrder.filter(function(name){ return !!crops[name]; });
+    if (!viewList.length){ alert('먼저 거래처 자리를 하나 이상 표시해주세요.'); return; }
+    viewPos = 0;
+    showViewerCard();
+    viewer.classList.remove('hidden');
+  });
+
+  // 거래처 목록에서 "보기"를 누르면, 그 거래처 한 장만 바로 크게 보여줌
+  // (이전/다음이나 스와이프로 다른 거래처로 넘어가는 것도 그대로 가능함).
+  function openViewerAt(name){
+    viewList = vendorOrder.filter(function(n){ return !!crops[n]; });
+    var idx = viewList.indexOf(name);
+    if (idx === -1){ alert('아직 자리 표시가 안 된 거래처예요.'); return; }
+    viewPos = idx;
+    showViewerCard();
+    viewer.classList.remove('hidden');
+  }
+
+  var viewerScale = 1, viewerTX = 0, viewerTY = 0;
+  function applyViewerTransform(){
+    viewerImg.style.transform = 'translate(' + viewerTX + 'px,' + viewerTY + 'px) scale(' + viewerScale + ')';
+  }
+  function resetViewerTransform(){
+    viewerScale = 1; viewerTX = 0; viewerTY = 0;
+    applyViewerTransform();
+  }
+
+  function showViewerCard(){
+    var name = viewList[viewPos];
+    viewerName.textContent = name;
+    viewerIdx.textContent = (viewPos + 1) + ' / ' + viewList.length;
+    viewerImg.src = crops[name].dataUrl;
+    resetViewerTransform();
+  }
+
+  document.getElementById('viewerCloseBtn').addEventListener('click', function(){ viewer.classList.add('hidden'); });
+  document.getElementById('viewerPrevBtn').addEventListener('click', function(){
+    if (viewPos > 0){ viewPos--; showViewerCard(); }
+  });
+  document.getElementById('viewerNextBtn').addEventListener('click', function(){
+    if (viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
+  });
+
+  // 사진 확대/이동: 손가락 두 개로 오므리고 펴서 확대, 확대된 상태에서 한 손가락으로 끌면 이동.
+  // 확대가 안 된 상태(100%)에서 한 손가락으로 밀면 이전/다음 거래처로 넘어감. 두 번 톡톡 두드리면 확대/축소 전환.
+  var touchStartX = null;
+  var vPinchStartDist = null, vPinchStartScale = 1;
+  var vPanStart = null;
+  var lastTapTime = 0;
+
+  viewerBody.addEventListener('touchstart', function(evt){
+    if (evt.touches.length === 2){
+      vPinchStartDist = touchDistance(evt.touches);
+      vPinchStartScale = viewerScale;
+      touchStartX = null;
+    } else if (evt.touches.length === 1){
+      if (viewerScale > 1){
+        vPanStart = { x: evt.touches[0].clientX - viewerTX, y: evt.touches[0].clientY - viewerTY };
+      } else {
+        touchStartX = evt.touches[0].clientX;
+      }
+    }
+  }, { passive: true });
+
+  viewerBody.addEventListener('touchmove', function(evt){
+    if (evt.touches.length === 2 && vPinchStartDist){
+      evt.preventDefault();
+      var d = touchDistance(evt.touches);
+      viewerScale = Math.max(1, Math.min(4, vPinchStartScale * (d / vPinchStartDist)));
+      applyViewerTransform();
+    } else if (evt.touches.length === 1 && vPanStart){
+      evt.preventDefault();
+      viewerTX = evt.touches[0].clientX - vPanStart.x;
+      viewerTY = evt.touches[0].clientY - vPanStart.y;
+      applyViewerTransform();
+    }
+  }, { passive: false });
+
+  viewerBody.addEventListener('touchend', function(evt){
+    if (evt.touches.length < 2) vPinchStartDist = null;
+    if (evt.touches.length < 1){
+      vPanStart = null;
+      if (touchStartX !== null){
+        var dx = evt.changedTouches[0].clientX - touchStartX;
+        touchStartX = null;
+        if (Math.abs(dx) >= 50){
+          if (dx < 0 && viewPos < viewList.length - 1){ viewPos++; showViewerCard(); }
+          else if (dx > 0 && viewPos > 0){ viewPos--; showViewerCard(); }
+          return;
+        }
+        // 짧게 톡 두드린 경우 더블탭 확대/축소 판정
+        var now = Date.now();
+        if (now - lastTapTime < 320){
+          if (viewerScale > 1) resetViewerTransform();
+          else { viewerScale = 2.5; applyViewerTransform(); }
+          lastTapTime = 0;
+        } else {
+          lastTapTime = now;
+        }
+      }
+    }
+  }, { passive: true });
+
+  // ---------- 초기 거래처 목록이 하나도 없으면 예시로 채워줌 ----------
+  if (!vendorOrder.length){
+    vendorOrder = ['다농마트', '우주식품', '태인성', '충북', '신아물산', '충무(금길수산)', '유창', '아침에찬', '세진or조양', '스마일', '광덕', '진양', '신흥'];
+    saveVendorOrder(vendorOrder);
+  }
+
+  renderVendorList();
+})();
+</script>
+</body>
+</html>
