@@ -69,14 +69,32 @@
     border:1px solid var(--accent); color:var(--ink); padding:12px 16px; border-radius:12px; font-size:14px;
     max-width:86%; text-align:center; z-index:100; opacity:0; pointer-events:none; transition:opacity .2s; }
   #toast.show{ opacity:1; }
+  .excel-vendor{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px 10px; margin-bottom:8px; }
+  .excel-vendor .name{ font-weight:800; font-size:15px; margin-bottom:6px; }
+  .excel-item{ display:flex; align-items:flex-start; gap:8px; padding:6px 2px; border-top:1px solid var(--line); }
+  .excel-item:first-of-type{ border-top:none; }
+  .excel-item input[type=checkbox]{ width:20px; height:20px; margin-top:1px; flex:none; }
+  .excel-item .itext{ flex:1; font-size:14px; }
+  .excel-item.picked .itext{ text-decoration:line-through; color:var(--sub); }
+  .excel-item .qty{ font-size:14px; color:var(--sub); flex:none; }
+  .excel-item.qty-warn .qty{ color:var(--danger); font-weight:800; }
+  .excel-item.qty-warn .itext{ font-weight:800; }
+  .excel-summary{ font-size:12px; color:var(--sub); margin:4px 0 8px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🥬 가락시장 사입 도우미</h1>
 
+  <div class="card" id="excelCard">
+    <div class="step-title">0. 엑셀 파일로 자동 불러오기 (있으면 이걸로)</div>
+    <input type="file" id="excelInput" accept=".xlsx,.xls,.xlsm">
+    <div id="excelSummary" class="excel-summary"></div>
+    <div id="excelList"></div>
+  </div>
+
   <div class="card" id="uploadCard">
-    <div class="step-title">1. 오늘 받은 사입 목록 사진</div>
+    <div class="step-title">1. 오늘 받은 사입 목록 사진 (엑셀이 없을 때)</div>
     <input type="file" id="fileInput" accept="image/*" multiple>
     <div id="imgTabs" class="row" style="margin-top:8px;"></div>
   </div>
@@ -133,6 +151,7 @@
 </div>
 
 <div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (function(){
   'use strict';
@@ -215,6 +234,190 @@
   var sourceImages = []; // [{img, url}] 오늘 올린 원본 사진들
   var currentSourceIndex = 0;
   var pendingVendorName = null;
+
+  // ---------- 엑셀 파일로 자동 불러오기 ----------
+  // 회사에서 보내주는 발주서 엑셀(가락시장 시트: A/C/E열에 거래처명, 바로 오른쪽 칸에 수량이
+  // 있으면 품목, 없으면 새 거래처 이름 / 제이엘엠 시트: 순번·품목·수량 3칸)을 그대로 읽어서
+  // 거래처별 품목 목록을 자동으로 만들어준다. 사진 자르기 작업을 통째로 건너뛸 수 있음.
+  var EXCEL_DATA_KEY = 'garak.excelData.v1';
+  var EXCEL_PICK_KEY = 'garak.excelPicks.v1';
+  function loadExcelData(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return null;
+    try { return JSON.parse(localStorage.getItem(EXCEL_DATA_KEY) || 'null'); } catch(e){ return null; }
+  }
+  function saveExcelData(data){
+    try {
+      localStorage.setItem(EXCEL_DATA_KEY, JSON.stringify(data));
+      localStorage.setItem(DATE_KEY, todayStr());
+    } catch(e){}
+  }
+  function loadExcelPicks(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return {};
+    try { return JSON.parse(localStorage.getItem(EXCEL_PICK_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveExcelPicks(map){
+    try { localStorage.setItem(EXCEL_PICK_KEY, JSON.stringify(map)); } catch(e){}
+  }
+
+  var excelGroups = loadExcelData(); // [{groupName, vendors:[{name, items:[{text, qty}]}]}]
+  var excelPicks = loadExcelPicks(); // { "거래처명||품목명": true }
+
+  function clean(v){ return (v === null || v === undefined) ? '' : String(v).trim(); }
+
+  // 가락시장 시트: A,C,E(그리고 있으면 그 뒤로도 두 칸씩)를 각각 하나의 "레인"으로 보고,
+  // 레인 안에서 위->아래로 훑으면서, 옆칸(수량)이 비어있으면 "새 거래처 이름"으로, 옆칸에
+  // 뭔가 적혀 있으면 "그 거래처의 품목"으로 본다. 품목이 하나도 안 붙은 거래처(빈 구분선,
+  // 이름만 있고 아직 안 적힌 곳 등)는 자동으로 걸러진다.
+  function parseLaneSheet(sheet){
+    var range = XLSX.utils.decode_range(sheet['!ref']);
+    var vendors = []; // {name, items:[], row}
+    for (var itemCol = range.s.c; itemCol <= range.e.c; itemCol += 2){
+      var qtyCol = itemCol + 1;
+      var cur = null;
+      for (var r = range.s.r; r <= range.e.r; r++){
+        var itemCell = sheet[XLSX.utils.encode_cell({ r: r, c: itemCol })];
+        var qtyCell = sheet[XLSX.utils.encode_cell({ r: r, c: qtyCol })];
+        var itemV = clean(itemCell && itemCell.v);
+        var qtyV = clean(qtyCell && qtyCell.v);
+        if (!itemV || itemV === '품목' || itemV === '수량') continue;
+        if (!qtyV || qtyV === '품목' || qtyV === '수량'){
+          cur = { name: itemV, items: [], row: r };
+          vendors.push(cur);
+        } else if (cur) {
+          cur.items.push({ text: itemV, qty: qtyV });
+        }
+      }
+    }
+    vendors = vendors.filter(function(v){ return v.items.length > 0; });
+    vendors.sort(function(a, b){ return a.row - b.row; });
+    return vendors;
+  }
+
+  // 제이엘엠 시트: 순번/품목/수량 3칸짜리 표. 거래처 구분이 따로 없고 시트 전체가 그 거래처 하나.
+  function parseSimpleSheet(sheet, vendorName){
+    var range = XLSX.utils.decode_range(sheet['!ref']);
+    var items = [];
+    for (var r = range.s.r; r <= range.e.r; r++){
+      // 순번(첫 칸), 품목, 수량 순서로 되어있다고 보고 각 행에서 텍스트가 있는 칸과 그 다음 칸을 품목/수량으로 씀.
+      var rowVals = [];
+      for (var c = range.s.c; c <= range.e.c; c++){
+        var cell = sheet[XLSX.utils.encode_cell({ r: r, c: c })];
+        rowVals.push(clean(cell && cell.v));
+      }
+      // 순번(숫자)칸 다음의 첫 텍스트를 품목으로, 그 다음 비지 않은 칸을 수량으로 봄.
+      var HEADER_WORDS = ['품목', '수량', '순번'];
+      var itemText = '', qtyText = '';
+      for (var i = 0; i < rowVals.length; i++){
+        if (rowVals[i] && !/^\d+$/.test(rowVals[i]) && HEADER_WORDS.indexOf(rowVals[i]) === -1){
+          itemText = rowVals[i];
+          for (var j = i + 1; j < rowVals.length; j++){
+            if (rowVals[j] && HEADER_WORDS.indexOf(rowVals[j]) === -1) { qtyText = rowVals[j]; break; }
+          }
+          break;
+        }
+      }
+      if (itemText && qtyText) items.push({ text: itemText, qty: qtyText });
+    }
+    if (!items.length) return [];
+    return [{ name: vendorName, items: items }];
+  }
+
+  function handleExcelFile(file){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        var groups = [];
+        wb.SheetNames.forEach(function(sheetName){
+          var sheet = wb.Sheets[sheetName];
+          if (!sheet || !sheet['!ref']) return;
+          if (sheetName.indexOf('가락') !== -1){
+            var vendors = parseLaneSheet(sheet);
+            if (vendors.length) groups.push({ groupName: '가락시장', vendors: vendors });
+          } else if (sheetName.indexOf('엘엠') !== -1){
+            var jlmVendors = parseSimpleSheet(sheet, sheetName.trim());
+            if (jlmVendors.length) groups.push({ groupName: sheetName.trim(), vendors: jlmVendors });
+          }
+        });
+        if (!groups.length){
+          alert('가락시장/제이엘엠 형식의 시트를 찾지 못했어요. 파일을 확인해주세요.');
+          return;
+        }
+        excelGroups = groups;
+        excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
+        saveExcelData(excelGroups);
+        saveExcelPicks(excelPicks);
+        renderExcelList();
+        alert('엑셀에서 불러왔습니다.');
+      } catch(err){
+        alert('엑셀을 읽는 중 문제가 생겼어요: ' + (err && err.message || err));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function pickKey(vendorName, itemText){ return vendorName + '||' + itemText; }
+
+  function renderExcelList(){
+    var listEl = document.getElementById('excelList');
+    var summaryEl = document.getElementById('excelSummary');
+    listEl.innerHTML = '';
+    if (!excelGroups || !excelGroups.length){
+      summaryEl.textContent = '';
+      return;
+    }
+    var totalItems = 0, pickedItems = 0;
+    excelGroups.forEach(function(group){
+      group.vendors.forEach(function(v){
+        v.items.forEach(function(it){
+          totalItems++;
+          if (excelPicks[pickKey(v.name, it.text)]) pickedItems++;
+        });
+      });
+    });
+    summaryEl.textContent = '픽킹 완료 ' + pickedItems + ' / 전체 ' + totalItems + '개 품목';
+
+    excelGroups.forEach(function(group){
+      var groupTitle = document.createElement('div');
+      groupTitle.className = 'step-title';
+      groupTitle.style.marginTop = '10px';
+      groupTitle.textContent = group.groupName;
+      listEl.appendChild(groupTitle);
+
+      group.vendors.forEach(function(v){
+        var card = document.createElement('div');
+        card.className = 'excel-vendor';
+        var itemsHtml = v.items.map(function(it){
+          var qtyNum = parseInt(it.qty, 10);
+          var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
+          var key = pickKey(v.name, it.text);
+          var picked = !!excelPicks[key];
+          return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
+            '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
+            '<span class="itext">' + escapeHtml(it.text) + '</span>' +
+            '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
+            '</label>';
+        }).join('');
+        card.innerHTML = '<div class="name">' + escapeHtml(v.name) + '</div>' + itemsHtml;
+        listEl.appendChild(card);
+      });
+    });
+
+    listEl.querySelectorAll('[data-pickkey]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        if (this.checked) excelPicks[this.dataset.pickkey] = true; else delete excelPicks[this.dataset.pickkey];
+        saveExcelPicks(excelPicks);
+        renderExcelList();
+      });
+    });
+  }
+
+  document.getElementById('excelInput').addEventListener('change', function(){
+    if (this.files && this.files[0]) handleExcelFile(this.files[0]);
+  });
+  renderExcelList();
 
   var fileInput = document.getElementById('fileInput');
   var imgTabs = document.getElementById('imgTabs');
