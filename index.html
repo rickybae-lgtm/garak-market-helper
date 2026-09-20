@@ -292,6 +292,21 @@
       .replace(/\s+/g, '')       // 공백 제거
       .trim();
   }
+  // 업체목록에 등록해둔 전화번호를(있으면) 이름으로 찾아준다. 이름 표기가 정확히 안 맞아도
+  // sortVendorsByVendorList와 같은 방식(공백/괄호 제거 후 비교, 그다음 부분 일치)으로 찾는다.
+  function findPhoneForVendor(name){
+    var norm = normalizeVendorName(name);
+    var keys = Object.keys(vendorPhones);
+    for (var i = 0; i < keys.length; i++){
+      if (normalizeVendorName(keys[i]) === norm && vendorPhones[keys[i]]) return vendorPhones[keys[i]];
+    }
+    for (var j = 0; j < keys.length; j++){
+      var nk = normalizeVendorName(keys[j]);
+      if (nk && norm && vendorPhones[keys[j]] && (norm.indexOf(nk) !== -1 || nk.indexOf(norm) !== -1)) return vendorPhones[keys[j]];
+    }
+    return '';
+  }
+
   function sortVendorsByVendorList(vendors){
     var normOrder = vendorOrder.map(normalizeVendorName);
     var withIdx = vendors.map(function(v, i){
@@ -476,9 +491,11 @@
         row.style.display = 'flex';
         row.style.alignItems = 'center';
         row.style.gap = '8px';
+        var phone = findPhoneForVendor(v.name);
         row.innerHTML =
           '<div class="name" style="flex:1; margin:0;">' + escapeHtml(v.name) +
             '<div class="status" style="font-weight:400; font-size:12px; color:var(--sub);">품목 ' + v.items.length + '개 · 픽킹 ' + done + '/' + v.items.length + '</div></div>' +
+          (phone ? '<a class="btn sm" href="tel:' + escapeHtml(phone) + '">📞</a>' : '') +
           '<button class="btn sm accent" data-exview="' + escapeHtml(group.groupName) + '|' + escapeHtml(v.name) + '">품목보기</button>';
         listEl.appendChild(row);
       });
@@ -512,7 +529,9 @@
     if (!v){ bodyEl.innerHTML = '<div class="empty">품목을 찾을 수 없어요.</div>'; return; }
     document.getElementById('excelDetailName').textContent = v.name;
     var done = vendorDoneCount(v);
-    document.getElementById('excelDetailSummary').textContent = '픽킹 ' + done + ' / ' + v.items.length;
+    var detailPhone = findPhoneForVendor(v.name);
+    document.getElementById('excelDetailSummary').innerHTML = '픽킹 ' + done + ' / ' + v.items.length +
+      (detailPhone ? ' · <a href="tel:' + escapeHtml(detailPhone) + '" style="color:var(--accent);">📞 ' + escapeHtml(detailPhone) + '</a>' : '');
     bodyEl.innerHTML = v.items.map(function(it){
       var qtyNum = parseInt(it.qty, 10);
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
