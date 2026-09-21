@@ -86,8 +86,8 @@
   .excel-vendor.done{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
   .ambig-row{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:10px; }
   .ambig-row .atext{ font-weight:800; font-size:15px; margin-bottom:8px; }
-  .ambig-row .achoices{ display:flex; gap:8px; }
-  .ambig-row .achoice{ flex:1; padding:10px 6px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--fg); font-size:14px; font-weight:700; }
+  .ambig-row .achoices{ display:flex; flex-wrap:wrap; gap:8px; }
+  .ambig-row .achoice{ flex:1; min-width:96px; padding:10px 6px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--fg); font-size:13px; font-weight:700; }
   .ambig-row .achoice.picked{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 22%, transparent); }
   .tabbar{ position:sticky; top:0; z-index:20; display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
     background:var(--bg); padding:8px 2px; margin:0 0 10px; border-bottom:1px solid var(--line); }
@@ -409,9 +409,13 @@
     var normList = vendorOrder.map(normalizeVendorName);
     var idx = normList.indexOf(norm);
     if (idx !== -1) return vendorOrder[idx];
+    // 부분 일치는 "셀에 적힌 글자가 등록된 업체명 전체를 포함하는" 방향으로만 허용한다
+    // (예: "우주 식품(02-407-0450)"이 등록된 "우주식품"을 통째로 포함). 반대 방향(등록된 업체명이
+    // 셀 글자를 포함)까지 허용하면, "이탈리안드레싱(위쉬본)..." 같은 긴 품목명 안에 짧은 업체명 한
+    // 조각이 우연히 들어있을 때도 업체로 잘못 인식해버리는 문제가 있었음.
     for (var k = 0; k < vendorOrder.length; k++){
       var nk = normList[k];
-      if (nk && (norm.indexOf(nk) !== -1 || nk.indexOf(norm) !== -1)) return vendorOrder[k];
+      if (nk && norm.indexOf(nk) !== -1) return vendorOrder[k];
     }
     return null;
   }
@@ -479,10 +483,12 @@
         if (prev.kind === 'vendor' || prev.kind === 'ambiguous') break; // 그 전 헤더성 줄까지만 확인
       }
 
-      // 미리 찍어둔 기본 추측(추가설명 vs 업체명)에 따라, 실제로 결과가 달라지는 경우에만 물어본다.
-      // - "추가설명"으로 보이는데 붙일 품목이 바로 위에 없으면 → 어차피 아무 효과 없음 → 조용히 무시
-      // - "업체명"으로 보이는데 뒤에 딸려올 품목이 없으면 → 어차피 품목 0개로 자동 제외됨 → 조용히 무시
-      var matters = (tok.resolution === 'note') ? hasPrecedingItem : hasFollowingItem;
+      // 앞뒤로 바로 붙어있는 품목이 하나도 없으면(위에 붙일 것도, 아래로 딸려올 것도 없음)
+      // 업체명으로 보든 추가설명으로 보든 결과가 똑같다(둘 다 품목 0개로 조용히 사라짐) → 안 물어봄.
+      // 둘 중 하나라도 있으면 실제로 결과가 달라지므로 반드시 물어본다.
+      // (주의: "추가설명처럼 보인다"는 이유만으로 뒤에 붙어있는 품목을 안 보고 넘어가면, 그 품목이
+      // 엉뚱하게 이 줄을 업체명 삼아 딸려들어가 버리는 사고가 날 수 있어서 항상 양쪽 다 확인해야 함)
+      var matters = hasPrecedingItem || hasFollowingItem;
       if (!matters){
         tok.autoResolved = true;
         tok.resolution = 'vendor';
@@ -490,8 +496,9 @@
     }
   }
 
-  // ambiguous 토큰들에 정해진 resolution('vendor' 또는 'note')을 반영해서 최종 업체 목록을 만든다.
-  // 'vendor'로 정하면 거기서부터 새 업체가 시작되고, 'note'로 정하면 바로 위 품목의 추가설명으로 붙는다.
+  // ambiguous 토큰들에 정해진 resolution('vendor'/'note'/'item')을 반영해서 최종 업체 목록을 만든다.
+  // 'vendor'로 정하면 거기서부터 새 업체가 시작되고, 'note'로 정하면 바로 위 품목의 추가설명으로 붙고,
+  // 'item'으로 정하면(수량 없이) 지금 업체의 품목 하나로 그냥 추가된다.
   function buildVendorsFromLanes(lanes){
     var vendors = [];
     lanes.forEach(function(lane){
@@ -507,6 +514,8 @@
             var last = cur.items[cur.items.length - 1];
             last.text = last.text + ' (' + tok.text + ')';
           }
+        } else if (tok.kind === 'ambiguous' && tok.resolution === 'item'){
+          if (cur) cur.items.push({ text: tok.text, qty: '수량확인' });
         }
       });
     });
@@ -573,7 +582,7 @@
     alert('엑셀에서 불러왔습니다.');
   }
 
-  // 업체목록에 없는(=애매한) 줄들을 사용자에게 보여주고 "업체명"인지 "추가설명"인지 고르게 한다.
+  // 업체목록에 없는(=애매한) 줄들을 사용자에게 보여주고 "업체명"/"추가설명"/"품목명"인지 고르게 한다.
   // 기본 선택값은 looksLikeNoteText로 대충 미리 골라두고, 사용자가 눌러서 바꿀 수 있게 함.
   function openAmbiguousResolver(ambiguousTokens, onConfirm){
     var bodyEl = document.getElementById('excelAmbiguousBody');
@@ -583,6 +592,7 @@
         '<div class="achoices">' +
           '<button class="achoice' + (tok.resolution === 'vendor' ? ' picked' : '') + '" data-amb="' + i + '" data-val="vendor">업체명이에요</button>' +
           '<button class="achoice' + (tok.resolution === 'note' ? ' picked' : '') + '" data-amb="' + i + '" data-val="note">추가설명이에요</button>' +
+          '<button class="achoice' + (tok.resolution === 'item' ? ' picked' : '') + '" data-amb="' + i + '" data-val="item">품목이에요(수량없음)</button>' +
         '</div>' +
       '</div>';
     }).join('');
