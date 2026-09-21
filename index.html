@@ -75,7 +75,6 @@
   .excel-item:first-of-type{ border-top:none; }
   .excel-item input[type=checkbox]{ width:1.25em; height:1.25em; margin-top:0.05em; flex:none; }
   .excel-item .itext{ flex:1; font-size:0.875em; }
-  .excel-item .dupcount{ font-size:0.75em; color:var(--accent); font-weight:700; margin-left:4px; }
   .excel-item.picked .itext{ text-decoration:line-through; color:var(--sub); }
   .excel-item .qty{ font-size:0.875em; color:var(--sub); flex:none; }
   .excel-item.qty-warn .qty{ color:var(--danger); font-weight:800; }
@@ -725,20 +724,14 @@
     document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
       (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) : '');
 
-    // 이름이 완전히 같은 품목이 여러 줄로 나뉘어 있을 수 있어서(같은 재료를 수량 다르게 여러 번
-    // 적은 경우 등), 몇 개나 겹치는지 참고용 배지만 보여준다. 체크는 항상 그 줄 하나만 따로 된다.
-    var textCounts = {};
-    v.items.forEach(function(it){ textCounts[it.text] = (textCounts[it.text] || 0) + 1; });
-
     bodyEl.innerHTML = v.items.map(function(it, i){
       var qtyNum = parseInt(it.qty, 10);
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
       var key = pickKey(v.name, i, it.text);
       var picked = !!excelPicks[key];
-      var dupCount = textCounts[it.text];
       return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
         '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
-        '<span class="itext">' + escapeHtml(it.text) + (dupCount > 1 ? '<span class="dupcount">×' + dupCount + '</span>' : '') + '</span>' +
+        '<span class="itext">' + escapeHtml(it.text) + '</span>' +
         '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
         '</label>';
     }).join('');
