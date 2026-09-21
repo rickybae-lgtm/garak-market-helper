@@ -71,14 +71,18 @@
   #toast.show{ opacity:1; }
   .excel-vendor{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px 10px; margin-bottom:8px; }
   .excel-vendor .name{ font-weight:800; font-size:15px; margin-bottom:6px; }
-  .excel-item{ display:flex; align-items:flex-start; gap:8px; padding:6px 2px; border-top:1px solid var(--line); }
+  .excel-item{ display:flex; align-items:flex-start; gap:0.5em; padding:0.4em 0.15em; border-top:1px solid var(--line); }
   .excel-item:first-of-type{ border-top:none; }
-  .excel-item input[type=checkbox]{ width:20px; height:20px; margin-top:1px; flex:none; }
-  .excel-item .itext{ flex:1; font-size:14px; }
+  .excel-item input[type=checkbox]{ width:1.25em; height:1.25em; margin-top:0.05em; flex:none; }
+  .excel-item .itext{ flex:1; font-size:0.875em; }
+  .excel-item .dupcount{ font-size:0.75em; color:var(--accent); font-weight:700; margin-left:4px; }
   .excel-item.picked .itext{ text-decoration:line-through; color:var(--sub); }
-  .excel-item .qty{ font-size:14px; color:var(--sub); flex:none; }
+  .excel-item .qty{ font-size:0.875em; color:var(--sub); flex:none; }
   .excel-item.qty-warn .qty{ color:var(--danger); font-weight:800; }
   .excel-item.qty-warn .itext{ font-weight:800; }
+  #excelDetailBody{ touch-action:pan-y; }
+  .excel-selectall{ display:flex; align-items:center; gap:8px; padding:8px 12px; background:#0b1220; border-top:1px solid var(--line); font-size:14px; font-weight:700; }
+  .excel-selectall input[type=checkbox]{ width:20px; height:20px; }
   .excel-summary{ font-size:12px; color:var(--sub); margin:4px 0 8px; }
   .excel-vendor.done{ border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
   .ambig-row{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:10px; }
@@ -194,6 +198,10 @@
     <div><div class="vname" id="excelDetailName"></div><div class="idx" id="excelDetailSummary"></div></div>
     <button class="btn sm" id="excelDetailCloseBtn">닫기</button>
   </div>
+  <label class="excel-selectall">
+    <input type="checkbox" id="excelSelectAllCb">
+    <span>전체 선택 / 해제</span>
+  </label>
   <div class="viewer-body" id="excelDetailBody" style="overflow-y:auto; display:block; padding:12px;"></div>
 </div>
 
@@ -628,11 +636,14 @@
     reader.readAsArrayBuffer(file);
   }
 
-  function pickKey(vendorName, itemText){ return vendorName + '||' + itemText; }
+  // 이름이 완전히 같은 품목이 여러 줄로 따로 있을 수 있어서(예: 같은 재료를 두 번 나눠 적은 경우),
+  // 이름만으로 키를 만들면 서로 같은 취급이 되어 하나를 체크하면 다른 것도 같이 체크돼버린다.
+  // 그래서 줄 번호(itemIndex)까지 포함해서 각 줄이 항상 독립적으로 체크되게 한다.
+  function pickKey(vendorName, itemIndex, itemText){ return vendorName + '||' + itemIndex + '||' + itemText; }
 
   function vendorDoneCount(v){
     var done = 0;
-    v.items.forEach(function(it){ if (excelPicks[pickKey(v.name, it.text)]) done++; });
+    v.items.forEach(function(it, i){ if (excelPicks[pickKey(v.name, i, it.text)]) done++; });
     return done;
   }
 
@@ -649,9 +660,9 @@
     var totalItems = 0, pickedItems = 0;
     excelGroups.forEach(function(group){
       group.vendors.forEach(function(v){
-        v.items.forEach(function(it){
+        v.items.forEach(function(it, i){
           totalItems++;
-          if (excelPicks[pickKey(v.name, it.text)]) pickedItems++;
+          if (excelPicks[pickKey(v.name, i, it.text)]) pickedItems++;
         });
       });
     });
@@ -711,28 +722,94 @@
     document.getElementById('excelDetailName').textContent = v.name;
     var done = vendorDoneCount(v);
     var detailPhone = findPhoneForVendor(v.name);
-    document.getElementById('excelDetailSummary').innerHTML = '픽킹 ' + done + ' / ' + v.items.length +
+    document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
       (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) : '');
-    bodyEl.innerHTML = v.items.map(function(it){
+
+    // 이름이 완전히 같은 품목이 여러 줄로 나뉘어 있을 수 있어서(같은 재료를 수량 다르게 여러 번
+    // 적은 경우 등), 몇 개나 겹치는지 참고용 배지만 보여준다. 체크는 항상 그 줄 하나만 따로 된다.
+    var textCounts = {};
+    v.items.forEach(function(it){ textCounts[it.text] = (textCounts[it.text] || 0) + 1; });
+
+    bodyEl.innerHTML = v.items.map(function(it, i){
       var qtyNum = parseInt(it.qty, 10);
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
-      var key = pickKey(v.name, it.text);
+      var key = pickKey(v.name, i, it.text);
       var picked = !!excelPicks[key];
-      return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '" style="font-size:16px;">' +
+      var dupCount = textCounts[it.text];
+      return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
         '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
-        '<span class="itext">' + escapeHtml(it.text) + '</span>' +
+        '<span class="itext">' + escapeHtml(it.text) + (dupCount > 1 ? '<span class="dupcount">×' + dupCount + '</span>' : '') + '</span>' +
         '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
         '</label>';
     }).join('');
+
+    function syncSelectAllCb(){
+      var boxes = bodyEl.querySelectorAll('[data-pickkey]');
+      var allChecked = boxes.length > 0 && Array.prototype.every.call(boxes, function(b){ return b.checked; });
+      var selectAllCb = document.getElementById('excelSelectAllCb');
+      if (selectAllCb) selectAllCb.checked = allChecked;
+    }
+
     bodyEl.querySelectorAll('[data-pickkey]').forEach(function(cb){
       cb.addEventListener('change', function(){
+        // 이 줄 하나만 독립적으로 체크/해제. 이름이 같은 다른 줄에는 영향 없음.
         if (this.checked) excelPicks[this.dataset.pickkey] = true; else delete excelPicks[this.dataset.pickkey];
         saveExcelPicks(excelPicks);
         renderExcelDetail();
       });
     });
+    syncSelectAllCb();
   }
   document.getElementById('excelDetailCloseBtn').addEventListener('click', closeExcelDetail);
+
+  // 전체 선택/해제 체크박스: 지금 열려있는 거래처의 모든 품목을 한 번에 체크/해제.
+  document.getElementById('excelSelectAllCb').addEventListener('change', function(){
+    if (!excelDetailOpenName) return;
+    var checked = this.checked;
+    var sep2 = excelDetailOpenName.indexOf('|');
+    var groupName2 = excelDetailOpenName.slice(0, sep2), vendorName2 = excelDetailOpenName.slice(sep2 + 1);
+    var group2 = (excelGroups || []).filter(function(g){ return g.groupName === groupName2; })[0];
+    var v2 = group2 && group2.vendors.filter(function(x){ return x.name === vendorName2; })[0];
+    if (!v2) return;
+    v2.items.forEach(function(it, i){
+      var key = pickKey(v2.name, i, it.text);
+      if (checked) excelPicks[key] = true; else delete excelPicks[key];
+    });
+    saveExcelPicks(excelPicks);
+    renderExcelDetail();
+  });
+
+  // 품목보기 화면 확대/축소: 손가락 두 개로 오므리고 펴서 글씨 크기를 키우거나 줄임(이미지 확대와 같은 방식).
+  // 한 손가락으로는 그대로 스크롤(위/아래 넘기기)이 되도록 손댐.
+  (function setupExcelDetailPinchZoom(){
+    var bodyEl = document.getElementById('excelDetailBody');
+    var zoom = 1;
+    var pinchStartDist = null, pinchStartZoom = 1;
+    function applyZoom(){ bodyEl.style.fontSize = (16 * zoom) + 'px'; }
+    bodyEl.addEventListener('touchstart', function(evt){
+      if (evt.touches.length === 2){
+        pinchStartDist = touchDistance(evt.touches);
+        pinchStartZoom = zoom;
+      }
+    }, { passive: true });
+    bodyEl.addEventListener('touchmove', function(evt){
+      if (evt.touches.length === 2 && pinchStartDist){
+        evt.preventDefault();
+        var d = touchDistance(evt.touches);
+        zoom = Math.max(0.75, Math.min(2.5, pinchStartZoom * (d / pinchStartDist)));
+        applyZoom();
+      }
+    }, { passive: false });
+    bodyEl.addEventListener('touchend', function(evt){
+      if (evt.touches.length < 2) pinchStartDist = null;
+    }, { passive: true });
+    // 새 거래처를 열 때마다 확대 배율은 기본값(1배)으로 되돌린다.
+    var origOpen = openExcelDetail;
+    openExcelDetail = function(groupName, vendorName){
+      zoom = 1; applyZoom();
+      origOpen(groupName, vendorName);
+    };
+  })();
 
   document.getElementById('excelInput').addEventListener('change', function(){
     if (this.files && this.files[0]) handleExcelFile(this.files[0]);
