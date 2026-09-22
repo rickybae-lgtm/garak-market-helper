@@ -291,6 +291,28 @@
     return c.toDataURL('image/jpeg', 0.82);
   }
 
+  // 폰 카메라 원본(요즘은 5000만 화소 넘는 것도 흔함)을 그대로 붙들고 있으면 그만큼 처리할 때마다
+  // 실패할 확률이 높아지고 메모리도 많이 먹는다. 그래서 사진을 불러오자마자 한 번만 적당한 크기로
+  // 줄여서(가리키는 글씨는 충분히 읽힐 정도), 그 이후로는 앱 전체가 이 작은 사진만 다루게 한다.
+  var WORK_MAX_W = 1800;
+  function shrinkImageTo(img, maxW, quality, cb){
+    try {
+      var scale = Math.min(1, maxW / img.naturalWidth);
+      var w = Math.max(1, Math.round(img.naturalWidth * scale));
+      var h = Math.max(1, Math.round(img.naturalHeight * scale));
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      var dataUrl = c.toDataURL('image/jpeg', quality);
+      var im2 = new Image();
+      im2.onload = function(){ cb(im2, dataUrl); };
+      im2.onerror = function(){ cb(null, null); };
+      im2.src = dataUrl;
+    } catch(e){
+      cb(null, null);
+    }
+  }
+
   var vendorOrder = loadVendorOrder(); // ["다농마트","우주식품", ...]
   var vendorPhones = loadPhones(); // { "다농마트": "0224070450", ... }
   var editingPhoneIndex = null;
@@ -855,31 +877,77 @@
     });
   }
 
+  // 사진을 한꺼번에 여러 장 동시에 디코딩하면(특히 폰 카메라 원본처럼 용량이 큰 사진일수록)
+  // 메모리 부담이 커져서 그중 하나가 가끔 실패하는 것으로 보인다. 그래서 한 장씩 순서대로
+  // 처리하고, 실패하면 잠깐 쉬었다가 한 번 더 시도해서(순간적인 문제는 재시도로 넘어가게) 사진이
+  // 통째로 빠지는 일이 최대한 없게 한다.
+  // 사진 하나를 불러와서(실패하면 잠깐 쉬었다가 한 번 재시도), 곧바로 작업하기 좋은 크기로 줄인다.
+  // 결과는 항상 { ok, entry } 형태로 콜백에 넘김.
+  function loadOnePhoto(file, attempt, onDone){
+    var url = URL.createObjectURL(file);
+    var im = new Image();
+    im.onload = function(){
+      shrinkImageTo(im, WORK_MAX_W, 0.85, function(smallImg, smallUrl){
+        try { URL.revokeObjectURL(url); } catch(e){} // 원본 대용량 blob은 더 필요 없으니 바로 해제
+        if (!smallImg){
+          // 줄이기 자체가 실패했으면 원본이라도 그대로 씀(그래야 사진이 통째로 안 없어짐).
+          onDone({ ok: true, entry: { img: im, url: url, storedDataUrl: null } });
+          return;
+        }
+        var storedDataUrl = null;
+        try { storedDataUrl = makeStoredDataUrl(smallImg); } catch(e){ /* 압축 백업만 실패, 사진 자체는 정상 */ }
+        onDone({ ok: true, entry: { img: smallImg, url: smallUrl, storedDataUrl: storedDataUrl } });
+      });
+    };
+    im.onerror = function(){
+      try { URL.revokeObjectURL(url); } catch(e){}
+      if (attempt < 2){
+        setTimeout(function(){ loadOnePhoto(file, attempt + 1, onDone); }, 400);
+      } else {
+        onDone({ ok: false });
+      }
+    };
+    im.src = url;
+  }
+
   fileInput.addEventListener('change', function(){
     var files = Array.prototype.slice.call(fileInput.files || []);
     if (!files.length) return;
-    // 오늘 첫 사진을 올리는 시점(그 전엔 사진이 하나도 없었을 때)이면, 예전에 표시해둔
-    // "자리 표시" 기록이 남아있더라도 오늘 것으로 착각하지 않게 싹 지우고 새로 시작한다.
-    if (!sourceImages.length){
-      crops = {};
-      saveCrops(crops);
+    var idx = 0;
+    var loadedEntries = []; // 이번 배치에서 성공한 것들. 하나라도 실패하면 전부 버리고 처음부터 다시 올리게 함.
+    var failed = false;
+    function finishAll(){
+      if (failed){
+        // 부분적으로만 올라가면 나중에 헷갈리니까, 일부라도 실패하면 이번에 불러온 건 전부 버리고
+        // 처음부터 다시 올려달라고 안내한다.
+        loadedEntries.forEach(function(e){ try { URL.revokeObjectURL(e.url); } catch(err){} });
+        alert('사진을 불러오는 중 문제가 있었어요. 지금 선택한 사진들은 반영하지 않았으니, 사진 선택부터 다시 한 번 올려주세요.');
+        return;
+      }
+      // 오늘 첫 사진을 올리는 시점(그 전엔 사진이 하나도 없었을 때)이면, 예전에 표시해둔
+      // "자리 표시" 기록이 남아있더라도 오늘 것으로 착각하지 않게 싹 지우고 새로 시작한다.
+      if (!sourceImages.length){
+        crops = {};
+        saveCrops(crops);
+      }
+      var beforeCount = sourceImages.length;
+      loadedEntries.forEach(function(e){ sourceImages.push(e); });
+      currentSourceIndex = beforeCount;
+      renderImgTabs();
+      renderVendorList();
+      saveSourceImagesStorage();
     }
-    var loaded = 0;
-    files.forEach(function(f){
-      var url = URL.createObjectURL(f);
-      var im = new Image();
-      im.onload = function(){
-        sourceImages.push({ img: im, url: url, storedDataUrl: makeStoredDataUrl(im) });
-        loaded++;
-        if (loaded === files.length){
-          currentSourceIndex = sourceImages.length - files.length;
-          renderImgTabs();
-          renderVendorList();
-          saveSourceImagesStorage();
-        }
-      };
-      im.src = url;
-    });
+    function next(){
+      if (idx >= files.length){ finishAll(); return; }
+      var f = files[idx];
+      idx++;
+      loadOnePhoto(f, 0, function(result){
+        if (result.ok) loadedEntries.push(result.entry);
+        else failed = true;
+        next();
+      });
+    }
+    next();
     fileInput.value = '';
   });
 
@@ -887,18 +955,23 @@
   (function restoreSourceImages(){
     var stored = loadSourceImagesStorage();
     if (!stored.length) return;
-    var loaded = 0;
+    var settled = 0;
+    function onOneSettled(){
+      settled++;
+      if (settled === stored.length){
+        currentSourceIndex = 0;
+        renderImgTabs();
+        renderVendorList();
+      }
+    }
     stored.forEach(function(dataUrl){
       var im = new Image();
       im.onload = function(){
         sourceImages.push({ img: im, url: dataUrl, storedDataUrl: dataUrl });
-        loaded++;
-        if (loaded === stored.length){
-          currentSourceIndex = 0;
-          renderImgTabs();
-          renderVendorList();
-        }
+        onOneSettled();
       };
+      // 저장돼있던 사진 하나가 깨져서 안 열려도(용량 초과로 일부만 저장됐던 경우 등) 나머지는 복구되게.
+      im.onerror = onOneSettled;
       im.src = dataUrl;
     });
   })();
