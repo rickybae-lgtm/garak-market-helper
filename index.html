@@ -251,6 +251,49 @@
     toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2400);
   }
 
+  // ---------- 뒤로가기(휴대폰 뒤로가기 버튼/제스처)로 화면 닫기 ----------
+  // 원래는 원본보기/품목보기 같은 전체화면이 떠있는 채로 뒤로가기를 누르면 그대로 앱이
+  // 꺼져버렸음(연 화면 기록이 브라우저 히스토리에 없어서). 인터넷 브라우저처럼 뒤로가기를
+  // 누르면 방금 연 화면만 닫히고 그 전 화면으로 돌아가게, 화면 열 때마다 히스토리를 하나씩
+  // 쌓고 뒤로가기(popstate)가 오면 그 화면을 닫아주는 방식으로 바꿈.
+  // 화면을 코드에서(닫기 버튼 눌러서) 닫을 때도 반드시 이 쪽 함수를 통해서 닫아야
+  // 쌓아둔 히스토리 개수랑 실제 열린 화면 개수가 안 맞아지는 걸 막을 수 있음.
+  // id -> 실제로 화면을 숨기고 뒷정리하는 함수(예: 품목보기는 닫을 때 목록도 다시 그려줘야 함).
+  // 등록 안 해두면 그냥 기본으로 classList에 hidden만 붙임.
+  var garakModalClosers = {};
+  function garakRegisterModalCloser(id, closeFn){ garakModalClosers[id] = closeFn; }
+  function garakDefaultClose(id){
+    var el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  }
+  function garakOpenModal(id){
+    var el = document.getElementById(id);
+    if (el) el.classList.remove('hidden');
+    history.pushState({ garakModal: id }, '');
+  }
+  function garakCloseModal(id){
+    var el = document.getElementById(id);
+    if (el && el.classList.contains('hidden')) return; // 이미 닫혀있으면 아무것도 안 함
+    if (history.state && history.state.garakModal === id){
+      // 뒤로 가면 popstate 핸들러가 실제로 화면을 숨김 — 히스토리 개수를 맞추기 위해
+      // 여기서 직접 숨기지 않고 history.back()으로 처리함.
+      history.back();
+    } else {
+      (garakModalClosers[id] || function(){ garakDefaultClose(id); })();
+    }
+  }
+  window.addEventListener('popstate', function(){
+    var allIds = ['excelDetail', 'excelPreview', 'excelAmbiguous', 'excelIssues', 'viewer', 'cropCard'];
+    for (var i = 0; i < allIds.length; i++){
+      var mid = allIds[i];
+      var el = document.getElementById(mid);
+      if (el && !el.classList.contains('hidden')){
+        (garakModalClosers[mid] || function(){ garakDefaultClose(mid); })();
+        return; // 한 번에 하나만 닫음(맨 위에 떠있던 화면 하나)
+      }
+    }
+  });
+
   function todayStr(){ return new Date().toDateString(); }
 
   var VENDOR_KEY = 'garak.vendorOrder.v1';
@@ -671,7 +714,7 @@
     var bodyEl = document.getElementById('excelIssuesBody');
     bodyEl.innerHTML = '<div class="idx" style="margin-bottom:8px;">엑셀에서 불러왔어요. 다만 아래 ' + issues.length + '곳은 자동으로 처리가 잘 안 됐을 수 있어서 원본이랑 한번 대조해보시는 게 좋아요.</div>' +
       issues.map(function(msg){ return '<div class="ambig-row"><div class="atext">' + escapeHtml(msg) + '</div></div>'; }).join('');
-    document.getElementById('excelIssues').classList.remove('hidden');
+    garakOpenModal('excelIssues');
   }
 
   // 업체목록에 없는(=애매한) 줄들을 사용자에게 보여주고 "업체명"/"추가설명"/"품목명"인지 고르게 한다.
@@ -697,11 +740,10 @@
         });
       });
     });
-    var modal = document.getElementById('excelAmbiguous');
-    modal.classList.remove('hidden');
+    garakOpenModal('excelAmbiguous');
     var confirmBtn = document.getElementById('excelAmbiguousConfirmBtn');
     confirmBtn.onclick = function(){
-      modal.classList.add('hidden');
+      garakCloseModal('excelAmbiguous');
       onConfirm();
     };
   }
@@ -805,13 +847,14 @@
   function openExcelDetail(groupName, vendorName){
     excelDetailOpenName = groupName + '|' + vendorName;
     renderExcelDetail();
-    document.getElementById('excelDetail').classList.remove('hidden');
+    garakOpenModal('excelDetail');
   }
-  function closeExcelDetail(){
+  garakRegisterModalCloser('excelDetail', function(){
     excelDetailOpenName = null;
-    document.getElementById('excelDetail').classList.add('hidden');
+    garakDefaultClose('excelDetail');
     renderExcelList(); // 뒤로 나오면 픽킹 완료 개수 등 바뀐 내용 반영
-  }
+  });
+  function closeExcelDetail(){ garakCloseModal('excelDetail'); }
   function renderExcelDetail(){
     if (!excelDetailOpenName) return;
     var sep = excelDetailOpenName.indexOf('|');
@@ -906,31 +949,75 @@
     };
   })();
 
-  var lastExcelFile = null;
+  // 원본보기용 원본 파일 바이트를 localStorage에 같이 저장해둠. File 객체 자체는 새로고침/
+  // 앱 재시작하면 사라지기 때문에(브라우저가 File을 다시 안 넘겨줌), 바이트를 base64로
+  // 바꿔서 저장해두고 재시작 후에도 "원본보기" 버튼이 그대로 눌리게 함 — 새 파일을 다시
+  // 올리기 전까지는 계속 볼 수 있어야 한다는 요청 때문.
+  var EXCEL_RAW_KEY = 'garak.excelRawFile.v1';
+  var lastExcelBytes = null, lastExcelFileName = '';
+  function arrayBufferToBase64(buf){
+    var bytes = new Uint8Array(buf), binary = '', CHUNK = 0x8000;
+    for (var i = 0; i < bytes.length; i += CHUNK){
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+  function base64ToArrayBuffer(b64){
+    var binary = atob(b64), bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+  function saveExcelRaw(name, buf){
+    try { localStorage.setItem(EXCEL_RAW_KEY, JSON.stringify({ name: name, data: arrayBufferToBase64(buf) })); }
+    catch(e){ /* 용량 초과 등으로 저장 실패해도 이번 세션 안에서 보는 데는 지장 없음 */ }
+  }
+  function loadExcelRaw(){
+    try {
+      var raw = localStorage.getItem(EXCEL_RAW_KEY);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      return { name: obj.name, bytes: base64ToArrayBuffer(obj.data) };
+    } catch(e){ return null; }
+  }
+
   var excelPreviewBtn = document.getElementById('excelPreviewBtn');
   document.getElementById('excelInput').addEventListener('change', function(){
     if (this.files && this.files[0]){
-      lastExcelFile = this.files[0];
+      var file = this.files[0];
       excelPreviewBtn.style.display = '';
-      handleExcelFile(this.files[0]);
+      var rawReader = new FileReader();
+      rawReader.onload = function(e){
+        lastExcelBytes = e.target.result;
+        lastExcelFileName = file.name;
+        saveExcelRaw(file.name, lastExcelBytes);
+      };
+      rawReader.readAsArrayBuffer(file);
+      handleExcelFile(file);
     }
   });
   renderExcelList();
 
+  // 앱을 껐다 다시 켜도(뒤로가기로 꺼졌다 재실행해도) 새로 파일을 안 올려도 바로 원본보기가
+  // 되도록, 저장해둔 원본이 있으면 시작할 때 미리 불러와둠.
+  (function restoreExcelRawOnStart(){
+    var restored = loadExcelRaw();
+    if (restored){
+      lastExcelBytes = restored.bytes;
+      lastExcelFileName = restored.name;
+      excelPreviewBtn.style.display = '';
+    }
+  })();
+
   // 원본보기: 자동 불러오기 결과(정리된 화면) 말고, 엑셀 파일을 있는 그대로(시트 모양 그대로)
   // 보여줘서 자동 인식이 틀렸는지 원본과 직접 비교해볼 수 있게 함.
   function openExcelPreviewFromLastFile(){
-    if (!lastExcelFile) return;
-    var reader = new FileReader();
-    reader.onload = function(e){
-      try {
-        var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-        openExcelPreview(lastExcelFile.name, wb);
-      } catch(err){
-        alert('파일을 여는 중 문제가 생겼어요: ' + (err && err.message || err));
-      }
-    };
-    reader.readAsArrayBuffer(lastExcelFile);
+    if (!lastExcelBytes){ alert('불러온 파일이 없어요.'); return; }
+    try {
+      var wb = XLSX.read(new Uint8Array(lastExcelBytes), { type: 'array' });
+      openExcelPreview(lastExcelFileName, wb);
+    } catch(err){
+      alert('파일을 여는 중 문제가 생겼어요: ' + (err && err.message || err));
+    }
   }
   excelPreviewBtn.addEventListener('click', openExcelPreviewFromLastFile);
 
@@ -1041,17 +1128,17 @@
       b.addEventListener('click', function(){ showSheet(this.dataset.sheet); });
     });
     if (sheetNames.length) showSheet(sheetNames[0]);
-    document.getElementById('excelPreview').classList.remove('hidden');
+    garakOpenModal('excelPreview');
   }
   document.getElementById('excelPreviewCloseBtn').addEventListener('click', function(){
-    document.getElementById('excelPreview').classList.add('hidden');
+    garakCloseModal('excelPreview');
   });
 
   document.getElementById('excelIssuesCloseBtn').addEventListener('click', function(){
-    document.getElementById('excelIssues').classList.add('hidden');
+    garakCloseModal('excelIssues');
   });
   document.getElementById('excelIssuesOpenOrigBtn').addEventListener('click', function(){
-    document.getElementById('excelIssues').classList.add('hidden');
+    garakCloseModal('excelIssues');
     openExcelPreviewFromLastFile();
   });
 
@@ -1493,10 +1580,14 @@
     resetPoints();
     zoomLevel = 1;
     setZoomBtnActive();
-    cropCard.classList.remove('hidden');
+    garakOpenModal('cropCard');
     cropCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     requestAnimationFrame(applyZoom);
   }
+  garakRegisterModalCloser('cropCard', function(){
+    pendingVendorName = null;
+    garakDefaultClose('cropCard');
+  });
 
   function onStageTap(evt){
     if (!pendingVendorName) return;
@@ -1521,8 +1612,7 @@
   cropWrap.addEventListener('click', onStageTap);
 
   document.getElementById('cropCancelBtn').addEventListener('click', function(){
-    pendingVendorName = null;
-    cropCard.classList.add('hidden');
+    garakCloseModal('cropCard');
   });
 
   document.getElementById('cropSaveBtn').addEventListener('click', function(){
@@ -1549,8 +1639,7 @@
     crops[pendingVendorName] = { dataUrl: dataUrl };
     saveCrops(crops);
 
-    pendingVendorName = null;
-    cropCard.classList.add('hidden');
+    garakCloseModal('cropCard');
     renderVendorList();
   });
 
@@ -1568,7 +1657,7 @@
     if (!viewList.length){ alert('먼저 거래처 자리를 하나 이상 표시해주세요.'); return; }
     viewPos = 0;
     showViewerCard();
-    viewer.classList.remove('hidden');
+    garakOpenModal('viewer');
   });
 
   // 거래처 목록에서 "보기"를 누르면, 그 거래처 한 장만 바로 크게 보여줌
@@ -1579,7 +1668,7 @@
     if (idx === -1){ alert('아직 자리 표시가 안 된 거래처예요.'); return; }
     viewPos = idx;
     showViewerCard();
-    viewer.classList.remove('hidden');
+    garakOpenModal('viewer');
   }
 
   var viewerScale = 1, viewerTX = 0, viewerTY = 0;
@@ -1599,7 +1688,7 @@
     resetViewerTransform();
   }
 
-  document.getElementById('viewerCloseBtn').addEventListener('click', function(){ viewer.classList.add('hidden'); });
+  document.getElementById('viewerCloseBtn').addEventListener('click', function(){ garakCloseModal('viewer'); });
   document.getElementById('viewerPrevBtn').addEventListener('click', function(){
     if (viewPos > 0){ viewPos--; showViewerCard(); }
   });
