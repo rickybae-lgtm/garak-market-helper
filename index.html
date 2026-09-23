@@ -878,9 +878,44 @@
     var tabsEl = document.getElementById('excelPreviewTabs');
     var bodyEl = document.getElementById('excelPreviewBody');
     var sheetNames = wb.SheetNames.filter(function(n){ return wb.Sheets[n] && wb.Sheets[n]['!ref']; });
+    // XLSX.utils.sheet_to_html은 <html><head>...<body> 통째 문서를 문자열로 만들어주는데,
+    // 그걸 그대로 innerHTML에 넣으면 브라우저가 이상하게 파싱해서(제목/메타 태그가 표 앞에
+    // 섞여 들어가거나, 병합된 칸/숫자 서식이 깨져서) 뒤죽박죽으로 보이는 문제가 있었음.
+    // 그래서 시트 데이터를 직접 읽어서 표를 만듦 — 병합된 칸(!merges)도 정확히 반영하고,
+    // 숫자/날짜도 엑셀에 보이는 서식 그대로(XLSX.utils.format_cell) 나오게 함.
     function showSheet(name){
-      var html = XLSX.utils.sheet_to_html(wb.Sheets[name], { id: 'excelPreviewTable' });
-      bodyEl.innerHTML = html;
+      var sheet = wb.Sheets[name];
+      var ref = sheet['!ref'];
+      var range = XLSX.utils.decode_range(ref);
+      var merges = sheet['!merges'] || [];
+      // 이미 병합 범위의 "안쪽"(왼쪽위 셀 제외)에 해당하는 좌표는 건너뛰기 위한 표시.
+      var skip = {};
+      var mergeStart = {}; // 'r_c' -> {rowspan, colspan}
+      merges.forEach(function(m){
+        for (var r = m.s.r; r <= m.e.r; r++){
+          for (var c = m.s.c; c <= m.e.c; c++){
+            if (r === m.s.r && c === m.s.c) continue;
+            skip[r + '_' + c] = true;
+          }
+        }
+        mergeStart[m.s.r + '_' + m.s.c] = { rowspan: m.e.r - m.s.r + 1, colspan: m.e.c - m.s.c + 1 };
+      });
+      var rowsHtml = [];
+      for (var R = range.s.r; R <= range.e.r; R++){
+        var cells = [];
+        for (var C = range.s.c; C <= range.e.c; C++){
+          var key = R + '_' + C;
+          if (skip[key]) continue;
+          var addr = XLSX.utils.encode_cell({ r: R, c: C });
+          var cell = sheet[addr];
+          var text = cell ? (cell.w != null ? cell.w : XLSX.utils.format_cell(cell)) : '';
+          var span = mergeStart[key];
+          var spanAttr = span ? ' rowspan="' + span.rowspan + '" colspan="' + span.colspan + '"' : '';
+          cells.push('<td' + spanAttr + '>' + escapeHtml(text) + '</td>');
+        }
+        rowsHtml.push('<tr>' + cells.join('') + '</tr>');
+      }
+      bodyEl.innerHTML = '<table id="excelPreviewTable">' + rowsHtml.join('') + '</table>';
       var tbl = document.getElementById('excelPreviewTable');
       if (tbl){
         tbl.style.borderCollapse = 'collapse';
