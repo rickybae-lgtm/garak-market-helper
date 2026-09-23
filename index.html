@@ -211,6 +211,7 @@
     <button class="btn sm" id="excelPreviewCloseBtn">닫기</button>
   </div>
   <div class="row" id="excelPreviewTabs" style="padding:8px 12px 0; gap:6px; flex-wrap:wrap;"></div>
+  <div class="zoom-hint" style="padding:0 12px;">두 손가락으로 오므리고 펴서 확대/축소 가능 · 화면이 잘리면 좌우로 넘겨서 보세요</div>
   <div class="viewer-body" id="excelPreviewBody" style="overflow:auto; display:block; padding:12px;"></div>
 </div>
 
@@ -919,7 +920,9 @@
       var tbl = document.getElementById('excelPreviewTable');
       if (tbl){
         tbl.style.borderCollapse = 'collapse';
-        tbl.style.fontSize = '13px';
+        // 표 자체엔 글씨 크기를 고정하지 않음 — 고정해버리면 아래 두 손가락 확대/축소가
+        // 부모(bodyEl)의 font-size를 바꿔도 표 안에서는 안 먹히는 문제가 있었음.
+        // bodyEl 쪽에서 크기를 정하고 표는 그걸 물려받게 둠.
         tbl.querySelectorAll('td,th').forEach(function(cell){
           cell.style.border = '1px solid #ddd';
           cell.style.padding = '4px 8px';
@@ -948,7 +951,7 @@
     var bodyEl = document.getElementById('excelPreviewBody');
     var zoom = 1;
     var pinchStartDist = null, pinchStartZoom = 1;
-    function applyZoom(){ bodyEl.style.fontSize = (13 * zoom) + 'px'; }
+    function applyZoom(){ bodyEl.style.fontSize = (15 * zoom) + 'px'; }
     bodyEl.addEventListener('touchstart', function(evt){
       if (evt.touches.length === 2){
         pinchStartDist = touchDistance(evt.touches);
