@@ -294,7 +294,14 @@
     }
   });
 
-  function todayStr(){ return new Date().toDateString(); }
+  // 자정이 아니라 "아침 10시"를 하루의 경계로 삼는다. 가락시장 사입 작업은 보통 한밤중~새벽 사이에
+  // 이어서 하는 경우가 많은데, 딱 자정(00:00)에 초기화해버리면 작업 도중에 날짜가 바뀌면서
+  // 하던 게 통째로 날아가버림. 그래서 아침 10시 전까지는 아직 "어제 작업"으로 쳐서 안 지워지게 함.
+  function todayStr(){
+    var d = new Date();
+    if (d.getHours() < 10) d.setDate(d.getDate() - 1);
+    return d.toDateString();
+  }
 
   var VENDOR_KEY = 'garak.vendorOrder.v1';
   var CROPS_KEY = 'garak.crops.v1';
@@ -471,6 +478,32 @@
 
   function clean(v){ return (v === null || v === undefined) ? '' : String(v).trim(); }
 
+  // 수량칸이 "2*3" 처럼 수식(곱셈 등)이었는데, 원본 파일에 계산된 결과값이 캐시되어 있지 않아서
+  // (엑셀이 아닌 다른 프로그램으로 만든 .xls 파일에서 종종 발생) 수식 글자 그대로("*" 포함)가
+  // 값으로 읽히는 경우가 있음. 실제 화면(원본보기)에는 계산된 숫자로 보일 수 있는데 자동 인식
+  // 결과에는 "*"가 낀 수식 텍스트가 그대로 나오는 버그의 원인. 숫자/사칙연산 기호만 있으면
+  // 직접 계산해서 순수 숫자로 바꿔준다.
+  function resolveQtyText(qtyCell){
+    var s = clean(qtyCell && qtyCell.v);
+    if (!s) return s;
+    var isNumericCell = qtyCell && qtyCell.t === 'n';
+    if (!isNumericCell && /[*/+\-]/.test(s) && /^[\d\s+\-*/().]+$/.test(s)){
+      try {
+        var calc = Function('"use strict"; return (' + s + ')')();
+        if (typeof calc === 'number' && isFinite(calc)) return String(calc);
+      } catch(e){ /* 계산 실패하면 원래 글자 그대로 둠 */ }
+    }
+    return s;
+  }
+
+  // 수량칸에 숫자/글자 없이 "*", "-", "○", "✓" 같은 표시(체크·강조 목적)만 달랑 하나 있는 경우.
+  // 이런 건 실제 수량이 아니라 업체명 옆에 사람이 그냥 찍어둔 표시일 뿐인데, 수량칸에 "뭔가 있다"고만
+  // 보면 업체명 줄이 품목 줄로 잘못 인식돼버림(예: "대호"라는 업체명 옆 수량칸에 "*"만 있으면
+  // "대호"가 업체명이 아니라 수량 "*"짜리 품목으로 잘못 읽혀버림).
+  function isMarkerOnlyText(s){
+    return !!s && !/[0-9\p{L}]/u.test(s);
+  }
+
   // 가락시장 시트: A,C,E(그리고 있으면 그 뒤로도 두 칸씩)를 각각 하나의 "레인"으로 보고,
   // 레인 안에서 위->아래로 훑으면서, 옆칸(수량)이 비어있으면 "새 거래처 이름"으로, 옆칸에
   // 뭔가 적혀 있으면 "그 거래처의 품목"으로 본다. 품목이 하나도 안 붙은 거래처(빈 구분선,
@@ -520,16 +553,16 @@
         var itemCell = sheet[XLSX.utils.encode_cell({ r: r, c: itemCol })];
         var qtyCell = sheet[XLSX.utils.encode_cell({ r: r, c: qtyCol })];
         var itemV = clean(itemCell && itemCell.v);
-        var qtyV = clean(qtyCell && qtyCell.v);
+        var qtyV = resolveQtyText(qtyCell);
         if (!itemV || itemV === '품목' || itemV === '수량'){
           // 품목칸은 비어있는데 수량칸에만 값이 있는 경우 — 원래는 있으면 안 되는 모양이라
           // 칸이 밀렸거나 잘못 적힌 걸 수 있음. 나중에 검증 결과에 띄워주기 위해 기록해둠.
-          if (itemV !== '품목' && qtyV && qtyV !== '품목' && qtyV !== '수량'){
+          if (itemV !== '품목' && qtyV && qtyV !== '품목' && qtyV !== '수량' && !isMarkerOnlyText(qtyV)){
             lane.push({ kind: 'orphanQty', text: qtyV, row: r });
           }
           continue;
         }
-        if (!qtyV || qtyV === '품목' || qtyV === '수량'){
+        if (!qtyV || qtyV === '품목' || qtyV === '수량' || isMarkerOnlyText(qtyV)){
           var matched = matchVendorName(itemV);
           if (matched){
             lane.push({ kind: 'vendor', text: matched, row: r });
@@ -660,10 +693,11 @@
     var items = [];
     for (var r = range.s.r; r <= range.e.r; r++){
       // 순번(첫 칸), 품목, 수량 순서로 되어있다고 보고 각 행에서 텍스트가 있는 칸과 그 다음 칸을 품목/수량으로 씀.
-      var rowVals = [];
+      var rowVals = [], rowCells = [];
       for (var c = range.s.c; c <= range.e.c; c++){
         var cell = sheet[XLSX.utils.encode_cell({ r: r, c: c })];
         rowVals.push(clean(cell && cell.v));
+        rowCells.push(cell);
       }
       // 순번(숫자)칸 다음의 첫 텍스트를 품목으로, 그 다음 비지 않은 칸을 수량으로 봄.
       var HEADER_WORDS = ['품목', '수량', '순번'];
@@ -672,7 +706,7 @@
         if (rowVals[i] && !/^\d+$/.test(rowVals[i]) && HEADER_WORDS.indexOf(rowVals[i]) === -1){
           itemText = rowVals[i];
           for (var j = i + 1; j < rowVals.length; j++){
-            if (rowVals[j] && HEADER_WORDS.indexOf(rowVals[j]) === -1) { qtyText = rowVals[j]; break; }
+            if (rowVals[j] && HEADER_WORDS.indexOf(rowVals[j]) === -1) { qtyText = resolveQtyText(rowCells[j]); break; }
           }
           break;
         }
