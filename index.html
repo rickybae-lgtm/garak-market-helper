@@ -849,7 +849,8 @@
       var groupTitle = document.createElement('div');
       groupTitle.className = 'step-title';
       groupTitle.style.marginTop = '10px';
-      groupTitle.textContent = group.groupName;
+      // "가락시장" 그룹만 오늘 사입해야 되는 업체 수를 옆에 숫자로 보여줌(제이엘엠 등 다른 그룹은 제외).
+      groupTitle.textContent = group.groupName + (group.groupName === '가락시장' ? ' (' + group.vendors.length + '개 업체)' : '');
       listEl.appendChild(groupTitle);
 
       group.vendors.forEach(function(v, i){
