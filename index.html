@@ -42,6 +42,7 @@
   .order-arrows button{ background:none; border:none; color:var(--sub); font-size:14px; cursor:pointer; padding:2px 4px; }
   .hidden{ display:none !important; }
   .empty{ color:var(--sub); font-size:14px; text-align:center; padding:16px 0; }
+  .hint{ font-size:12px; color:var(--sub); margin-bottom:4px; }
   #cropStage{ position:relative; width:100%; max-height:65vh; overflow:auto; -webkit-overflow-scrolling:touch;
     border-radius:12px; background:#000; margin-top:10px; }
   #cropWrap{ position:relative; }
@@ -130,7 +131,22 @@
     <div class="card">
       <div class="step-title">금일 사입업체 (거래처별 품목)</div>
       <div id="excelSummary" class="excel-summary"></div>
+      <button type="button" class="btn sm" id="kakaoAddOpenBtn" style="margin-bottom:8px;">💬 카톡 추가주문 넣기</button>
       <div id="excelList"></div>
+    </div>
+  </div>
+
+  <div class="viewer hidden" id="kakaoAddModal">
+    <div class="viewer-top">
+      <div><div class="vname">💬 카톡 추가주문 넣기</div><div class="idx">카톡으로 들어온 추가 주문을 바로 품목에 넣어요</div></div>
+      <button class="btn sm" id="kakaoAddCloseBtn">닫기</button>
+    </div>
+    <div class="viewer-body" id="kakaoAddBody" style="overflow-y:auto; display:block; padding:12px;">
+      <div class="hint">카톡 메시지를 그대로 복사해서 아래에 붙여넣어줘(여러 줄 한번에 가능). 예: "다농에 찹쌀가루 1킬로 추가요"</div>
+      <textarea id="kakaoAddText" placeholder="예시: 다농에 찹쌀가루 1킬로 추가요&#10;우주식품 멸치 2박스 추가" style="width:100%; min-height:110px; margin-top:8px;"></textarea>
+      <button type="button" class="btn sm accent" id="kakaoAddParseBtn" style="margin-top:8px;">자동 분석</button>
+      <div id="kakaoAddReview" style="margin-top:12px;"></div>
+      <button type="button" class="btn accent" id="kakaoAddCommitBtn" style="width:100%; margin-top:12px; display:none;">업체목록에 추가하기</button>
     </div>
   </div>
 
@@ -283,7 +299,7 @@
     }
   }
   window.addEventListener('popstate', function(){
-    var allIds = ['excelDetail', 'excelPreview', 'excelAmbiguous', 'excelIssues', 'viewer', 'cropCard'];
+    var allIds = ['excelDetail', 'excelPreview', 'excelAmbiguous', 'excelIssues', 'viewer', 'cropCard', 'kakaoAddModal'];
     for (var i = 0; i < allIds.length; i++){
       var mid = allIds[i];
       var el = document.getElementById(mid);
@@ -912,6 +928,111 @@
     });
   }
 
+  // ---------- 카톡 추가주문 넣기 ----------
+  // 주말 등에 엑셀 마감 이후 카톡으로 "다농에 찹쌀가루 1킬로 추가요" 식으로 막 들어오는 추가 주문을,
+  // 그 문장을 그대로 복사해 붙여넣으면 업체/품목/수량으로 대충 나눠서 보여주고, 틀린 부분만 손으로
+  // 고친 다음 한번에 "가락시장" 목록에 추가할 수 있게 해줌. 문장이 제각각이라 자동 분석이 완벽하진
+  // 않을 수 있어서, 넣기 전에 항상 사람이 확인/수정하는 단계를 거치게 함.
+  var KAKAO_FILLER_RE = /\s*(추가\s*해\s*주세요|추가해주세요|추가요|추가|주문\s*이요|주문해주세요|주문|부탁드립니다|부탁드려요|부탁해요|부탁|해주세요|좀요|좀)\s*$/;
+  var KAKAO_QTY_TAIL_RE = /^([\s\S]*?)[\s]*([\d]+(?:\.\d+)?\s*(?:킬로그램|킬로|그램|kg|KG|g|G|ml|ML|리터|L|개|박스|통|팩|병|봉지|봉|포대|포|자루|마리|판|줄|세트|대|장|단)?)\s*$/;
+  function parseKakaoLine(line){
+    var raw = line.trim();
+    if (!raw) return null;
+    var work = raw;
+    // "추가요", "주문 부탁드려요" 처럼 끝에 붙는 군더더기 말을 반복해서 벗겨냄.
+    var stripped;
+    do { stripped = work; work = work.replace(KAKAO_FILLER_RE, '').trim(); } while (work !== stripped && work);
+    var vendorRaw, rest;
+    if (work.indexOf('에') !== -1 && /에\s*/.test(work)){
+      var idx = work.indexOf('에');
+      vendorRaw = work.slice(0, idx).trim();
+      rest = work.slice(idx + 1).trim();
+    } else {
+      var sp = work.indexOf(' ');
+      if (sp === -1){ vendorRaw = work; rest = ''; }
+      else { vendorRaw = work.slice(0, sp).trim(); rest = work.slice(sp + 1).trim(); }
+    }
+    var matchedVendor = matchVendorName(vendorRaw);
+    var item = rest, qty = '';
+    var m = KAKAO_QTY_TAIL_RE.exec(rest);
+    if (m && m[2]){ item = m[1].trim(); qty = m[2].trim(); }
+    return { raw: raw, vendorRaw: vendorRaw, vendorMatched: matchedVendor, item: item, qty: qty };
+  }
+
+  var kakaoParsedRows = [];
+  function renderKakaoReview(){
+    var reviewEl = document.getElementById('kakaoAddReview');
+    var commitBtn = document.getElementById('kakaoAddCommitBtn');
+    if (!kakaoParsedRows.length){
+      reviewEl.innerHTML = '';
+      commitBtn.style.display = 'none';
+      return;
+    }
+    reviewEl.innerHTML = kakaoParsedRows.map(function(row, i){
+      return '<div class="card" style="padding:10px; margin-bottom:8px;">' +
+        '<div class="hint" style="margin-bottom:6px;">원문: ' + escapeHtml(row.raw) + '</div>' +
+        '<div class="hint">업체명' + (row.vendorMatched ? ' (✓업체목록에 있음)' : ' (⚠목록에 없음 — 새 업체로 추가됨)') + '</div>' +
+        '<input type="text" data-krow-vendor="' + i + '" value="' + escapeHtml(row.vendorMatched || row.vendorRaw) + '" style="width:100%; margin-bottom:6px;">' +
+        '<div class="hint">품목</div>' +
+        '<input type="text" data-krow-item="' + i + '" value="' + escapeHtml(row.item) + '" style="width:100%; margin-bottom:6px;">' +
+        '<div class="hint">수량</div>' +
+        '<input type="text" data-krow-qty="' + i + '" value="' + escapeHtml(row.qty) + '" style="width:100%; margin-bottom:6px;">' +
+        '<button type="button" class="btn sm danger" data-krow-del="' + i + '">이 줄 빼기</button>' +
+        '</div>';
+    }).join('');
+    reviewEl.querySelectorAll('[data-krow-vendor]').forEach(function(inp){
+      inp.addEventListener('input', function(){ kakaoParsedRows[+this.dataset.krowVendor].vendorRaw = this.value; kakaoParsedRows[+this.dataset.krowVendor].vendorMatched = matchVendorName(this.value); });
+    });
+    reviewEl.querySelectorAll('[data-krow-item]').forEach(function(inp){
+      inp.addEventListener('input', function(){ kakaoParsedRows[+this.dataset.krowItem].item = this.value; });
+    });
+    reviewEl.querySelectorAll('[data-krow-qty]').forEach(function(inp){
+      inp.addEventListener('input', function(){ kakaoParsedRows[+this.dataset.krowQty].qty = this.value; });
+    });
+    reviewEl.querySelectorAll('[data-krow-del]').forEach(function(b){
+      b.addEventListener('click', function(){ kakaoParsedRows.splice(+this.dataset.krowDel, 1); renderKakaoReview(); });
+    });
+    commitBtn.style.display = '';
+  }
+
+  document.getElementById('kakaoAddOpenBtn').addEventListener('click', function(){
+    document.getElementById('kakaoAddText').value = '';
+    kakaoParsedRows = [];
+    renderKakaoReview();
+    garakOpenModal('kakaoAddModal');
+  });
+  document.getElementById('kakaoAddCloseBtn').addEventListener('click', function(){ garakCloseModal('kakaoAddModal'); });
+  garakRegisterModalCloser('kakaoAddModal', function(){ document.getElementById('kakaoAddModal').classList.add('hidden'); });
+  document.getElementById('kakaoAddParseBtn').addEventListener('click', function(){
+    var text = document.getElementById('kakaoAddText').value || '';
+    var lines = text.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+    kakaoParsedRows = lines.map(parseKakaoLine).filter(Boolean);
+    if (!kakaoParsedRows.length) alert('분석할 내용이 없어요. 줄바꿈으로 여러 개 넣을 수 있어요.');
+    renderKakaoReview();
+  });
+  document.getElementById('kakaoAddCommitBtn').addEventListener('click', function(){
+    if (!kakaoParsedRows.length) return;
+    if (!excelGroups) excelGroups = [];
+    var group = excelGroups.filter(function(g){ return g.groupName === '가락시장'; })[0];
+    if (!group){ group = { groupName: '가락시장', vendors: [] }; excelGroups.push(group); }
+    var addedCount = 0;
+    kakaoParsedRows.forEach(function(row){
+      var vendorName = (row.vendorMatched || row.vendorRaw || '').trim();
+      if (!vendorName || !row.item) return;
+      var v = group.vendors.filter(function(x){ return x.name === vendorName; })[0];
+      if (!v){ v = { name: vendorName, items: [] }; group.vendors.push(v); }
+      v.items.push({ text: row.item, qty: row.qty || '수량확인', fromKakao: true });
+      addedCount++;
+    });
+    group.vendors = sortVendorsByVendorList(group.vendors);
+    saveExcelData(excelGroups);
+    kakaoParsedRows = [];
+    renderKakaoReview();
+    renderExcelList();
+    garakCloseModal('kakaoAddModal');
+    alert(addedCount + '개 추가했어요.');
+  });
+
   function openExcelDetail(groupName, vendorName){
     excelDetailOpenName = groupName + '|' + vendorName;
     renderExcelDetail();
@@ -944,7 +1065,7 @@
       var picked = !!excelPicks[key];
       return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
         '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
-        '<span class="itext">' + escapeHtml(it.text) + '</span>' +
+        '<span class="itext">' + (it.fromKakao ? '💬 ' : '') + escapeHtml(it.text) + '</span>' +
         '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
         '</label>';
     }).join('');
