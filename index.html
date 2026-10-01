@@ -516,14 +516,20 @@
   }
   // 예전에 저장된 데이터에 "특이사항"/"거래처 출고목록" 같은 메모용 시트가 이미 그룹으로
   // 끼어있을 수 있으니, 불러올 때마다 한 번 더 걸러준다.
-  var NON_VENDOR_GROUP_NAMES = ['특이사항', '거래처 출고목록', '출고목록'];
+  var NON_VENDOR_GROUP_NAMES = ['특이사항', '출고목록'];
+  // 시트/그룹 이름에 "출고목록"처럼 핵심 단어가 들어있기만 하면 걸러낸다(띄어쓰기 유무 등
+  // 표기가 조금씩 달라도 다 걸러지도록 정확히 일치하는지가 아니라 "포함"으로 검사함).
+  function isNonVendorGroupName(name){
+    var n = (name || '').replace(/\s+/g, '');
+    return NON_VENDOR_GROUP_NAMES.some(function(key){ return n.indexOf(key) !== -1; });
+  }
   function loadExcelData(){
     var savedDate = localStorage.getItem(DATE_KEY);
     if (savedDate !== todayStr()) return null;
     var data;
     try { data = JSON.parse(localStorage.getItem(EXCEL_DATA_KEY) || 'null'); } catch(e){ return null; }
     if (data && data.length){
-      data = data.filter(function(g){ return NON_VENDOR_GROUP_NAMES.indexOf(g.groupName) === -1; });
+      data = data.filter(function(g){ return !isNonVendorGroupName(g.groupName); });
     }
     return data;
   }
@@ -881,7 +887,7 @@
           var sheet = wb.Sheets[sheetName];
           if (!sheet || !sheet['!ref']) return;
           var trimmedName = sheetName.trim();
-          if (NON_VENDOR_GROUP_NAMES.indexOf(trimmedName) !== -1) return;
+          if (isNonVendorGroupName(trimmedName)) return;
           if (sheetName.indexOf('가락') !== -1){
             var lanes = scanLaneSheet(sheet);
             if (lanes.length) laneSheetEntries.push({ sheetName: sheetName, lanes: lanes });
