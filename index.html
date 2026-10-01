@@ -1081,21 +1081,33 @@
     if (!kakaoParsedRows.length) alert('분석할 내용이 없어요. 줄바꿈으로 여러 개 넣을 수 있어요.');
     renderKakaoReview();
   });
+  // 업체명이 "제이엘엠"/"이모유통"처럼 그 자체로 하나의 큰 그룹(시트 전체가 업체 하나)인 경우엔
+  // 그 그룹에 넣고, 그게 아니면(가락시장 레인 안의 개별 거래처들) "가락시장" 그룹에 넣는다.
+  function resolveKakaoTargetGroup(vendorName){
+    var exact = excelGroups.filter(function(g){ return g.groupName === vendorName; })[0];
+    if (exact) return exact;
+    var def = excelGroups.filter(function(g){ return g.groupName === '가락시장'; })[0];
+    if (!def){ def = { groupName: '가락시장', vendors: [] }; excelGroups.push(def); }
+    return def;
+  }
   document.getElementById('kakaoAddCommitBtn').addEventListener('click', function(){
     if (!kakaoParsedRows.length) return;
     if (!excelGroups) excelGroups = [];
-    var group = excelGroups.filter(function(g){ return g.groupName === '가락시장'; })[0];
-    if (!group){ group = { groupName: '가락시장', vendors: [] }; excelGroups.push(group); }
+    var touchedGroups = [];
     var addedCount = 0;
     kakaoParsedRows.forEach(function(row){
       var vendorName = (row.vendorMatched || row.vendorRaw || '').trim();
       if (!vendorName || !row.item) return;
+      var group = resolveKakaoTargetGroup(vendorName);
+      if (touchedGroups.indexOf(group) === -1) touchedGroups.push(group);
       var v = group.vendors.filter(function(x){ return x.name === vendorName; })[0];
       if (!v){ v = { name: vendorName, items: [] }; group.vendors.push(v); }
       v.items.push({ text: row.item, qty: row.qty || '수량확인', fromKakao: true });
       addedCount++;
     });
-    group.vendors = sortVendorsByVendorList(group.vendors);
+    touchedGroups.forEach(function(group){
+      if (group.groupName === '가락시장') group.vendors = sortVendorsByVendorList(group.vendors);
+    });
     saveExcelData(excelGroups);
     kakaoParsedRows = [];
     renderKakaoReview();
