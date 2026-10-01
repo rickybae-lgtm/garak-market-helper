@@ -145,10 +145,13 @@
       <div class="hint">카톡 메시지를 그대로 복사해서 아래에 붙여넣어줘(여러 줄 한번에 가능). 예: "다농에 찹쌀가루 1킬로 추가요"</div>
       <textarea id="kakaoAddText" placeholder="예시: 다농에 찹쌀가루 1킬로 추가요&#10;우주식품 멸치 2박스 추가" style="width:100%; min-height:110px; margin-top:8px;"></textarea>
       <button type="button" class="btn sm accent" id="kakaoAddParseBtn" style="margin-top:8px;">자동 분석</button>
+      <button type="button" class="btn sm" id="kakaoAddManualBtn" style="margin-top:8px;">✏️ 직접 입력으로 추가</button>
       <div id="kakaoAddReview" style="margin-top:12px;"></div>
       <button type="button" class="btn accent" id="kakaoAddCommitBtn" style="width:100%; margin-top:12px; display:none;">업체목록에 추가하기</button>
     </div>
   </div>
+
+  <datalist id="vendorNameDatalist"></datalist>
 
   <div id="tabRegister" class="tabpage hidden">
     <div class="card">
@@ -351,6 +354,13 @@
   }
   function saveVendorOrder(list){
     try { localStorage.setItem(VENDOR_KEY, JSON.stringify(list)); } catch(e){}
+    renderVendorDatalist();
+  }
+  // 업체명 입력칸(카톡 추가주문 등)에서 앞글자를 치면 업체목록이 자동완성으로 뜨게 해줌.
+  function renderVendorDatalist(){
+    var dl = document.getElementById('vendorNameDatalist');
+    if (!dl) return;
+    dl.innerHTML = vendorOrder.map(function(n){ return '<option value="' + escapeHtml(n) + '">'; }).join('');
   }
   function loadCrops(){
     var savedDate = localStorage.getItem(DATE_KEY);
@@ -933,30 +943,67 @@
   // 그 문장을 그대로 복사해 붙여넣으면 업체/품목/수량으로 대충 나눠서 보여주고, 틀린 부분만 손으로
   // 고친 다음 한번에 "가락시장" 목록에 추가할 수 있게 해줌. 문장이 제각각이라 자동 분석이 완벽하진
   // 않을 수 있어서, 넣기 전에 항상 사람이 확인/수정하는 단계를 거치게 함.
-  var KAKAO_FILLER_RE = /\s*(추가\s*해\s*주세요|추가해주세요|추가요|추가|주문\s*이요|주문해주세요|주문|부탁드립니다|부탁드려요|부탁해요|부탁|해주세요|좀요|좀)\s*$/;
-  var KAKAO_QTY_TAIL_RE = /^([\s\S]*?)[\s]*([\d]+(?:\.\d+)?\s*(?:킬로그램|킬로|그램|kg|KG|g|G|ml|ML|리터|L|개|박스|통|팩|병|봉지|봉|포대|포|자루|마리|판|줄|세트|대|장|단)?)\s*$/;
-  function parseKakaoLine(line){
-    var raw = line.trim();
-    if (!raw) return null;
-    var work = raw;
-    // "추가요", "주문 부탁드려요" 처럼 끝에 붙는 군더더기 말을 반복해서 벗겨냄.
-    var stripped;
+  var KAKAO_FILLER_RE = /\s*(추가\s*해\s*주세요|추가해주세요|추가요|추가|발주\s*했습니다|발주해주세요|발주|주문\s*이요|주문했습니다|주문해주세요|주문|부탁드립니다|부탁드려요|부탁해요|부탁|해주세요|좀요|좀)\s*$/;
+  function kakaoStripFiller(line){
+    var work = line, stripped;
+    // "추가 발주했습니다"처럼 군더더기 말이 여러 개 붙어있을 수 있어서, 끝에서부터 반복해서 벗겨냄.
     do { stripped = work; work = work.replace(KAKAO_FILLER_RE, '').trim(); } while (work !== stripped && work);
-    var vendorRaw, rest;
-    if (work.indexOf('에') !== -1 && /에\s*/.test(work)){
-      var idx = work.indexOf('에');
-      vendorRaw = work.slice(0, idx).trim();
-      rest = work.slice(idx + 1).trim();
-    } else {
-      var sp = work.indexOf(' ');
-      if (sp === -1){ vendorRaw = work; rest = ''; }
-      else { vendorRaw = work.slice(0, sp).trim(); rest = work.slice(sp + 1).trim(); }
-    }
-    var matchedVendor = matchVendorName(vendorRaw);
-    var item = rest, qty = '';
-    var m = KAKAO_QTY_TAIL_RE.exec(rest);
-    if (m && m[2]){ item = m[1].trim(); qty = m[2].trim(); }
-    return { raw: raw, vendorRaw: vendorRaw, vendorMatched: matchedVendor, item: item, qty: qty };
+    return work;
+  }
+  // 글자 뒤쪽의 "마지막 띄어쓰기 덩어리"를 수량으로 본다. 단위를 몰라도("4ro" 같은 줄임말·오타여도)
+  // 일단 수량칸에 넣어두고, 틀리면 검토 화면에서 사람이 고치게 함.
+  function kakaoSplitItemQty(text){
+    var m = /^([\s\S]*\S)\s+(\S+)$/.exec(text);
+    if (m) return { item: m[1].trim(), qty: m[2].trim() };
+    return { item: text.trim(), qty: '' };
+  }
+  // 카톡은 보통 "업체명" 한 줄, 그 아래에 "품목   수량" 한 줄(또는 여러 줄)로 오는 경우가 많다
+  // (예: "제이엘엠" 다음 줄에 "치즈(카우/위엔)125g   4ro"). 그래서 줄 하나하나를 따로 보지 않고,
+  // 숫자가 없는 짧은 줄이 나오면 "이제부터 이 업체 거다"라고 기억해뒀다가, 그 아래 숫자 있는
+  // 줄들을 전부 그 업체 품목으로 붙여준다. "다농에 찹쌀가루 1킬로"처럼 업체랑 품목이 한 줄에
+  // 같이 오는 경우도 그대로 지원함.
+  function parseKakaoBlock(text){
+    var rawLines = text.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+    var rows = [];
+    var currentVendor = null;
+    rawLines.forEach(function(rawLine){
+      var work = kakaoStripFiller(rawLine);
+      if (!work) return;
+      // 1) "업체에 품목 수량" 한 줄 형식
+      var eduIdx = work.indexOf('에');
+      if (eduIdx > 0 && eduIdx <= 10){
+        var vendorPart = work.slice(0, eduIdx).trim();
+        var restPart = work.slice(eduIdx + 1).trim();
+        if (vendorPart && restPart){
+          var sq1 = kakaoSplitItemQty(restPart);
+          currentVendor = vendorPart;
+          rows.push({ raw: rawLine, vendorRaw: vendorPart, vendorMatched: matchVendorName(vendorPart), item: sq1.item, qty: sq1.qty });
+          return;
+        }
+      }
+      // 2) 숫자가 전혀 없고 짧은 줄 — 업체명만 적힌 줄로 보고 기억만 해둠(바로 결과에 넣지 않음).
+      if (!/\d/.test(work) && work.length <= 12){
+        currentVendor = work;
+        return;
+      }
+      // 3) 그 외(숫자가 있는 줄) — 품목+수량 줄. 기억해둔 업체가 있으면 거기 붙이고,
+      //    없으면 혹시 첫 단어가 업체목록에 있는 이름인지 확인해봄(업체+품목이 한 줄에 바로 온 경우).
+      var vendorForRow = currentVendor;
+      var itemText = work;
+      if (!vendorForRow){
+        var sp = work.indexOf(' ');
+        if (sp !== -1){
+          var firstWord = work.slice(0, sp).trim();
+          if (matchVendorName(firstWord)){
+            vendorForRow = firstWord;
+            itemText = work.slice(sp + 1).trim();
+          }
+        }
+      }
+      var sq2 = kakaoSplitItemQty(itemText);
+      rows.push({ raw: rawLine, vendorRaw: vendorForRow || '', vendorMatched: vendorForRow ? matchVendorName(vendorForRow) : null, item: sq2.item, qty: sq2.qty });
+    });
+    return rows;
   }
 
   var kakaoParsedRows = [];
@@ -970,9 +1017,9 @@
     }
     reviewEl.innerHTML = kakaoParsedRows.map(function(row, i){
       return '<div class="card" style="padding:10px; margin-bottom:8px;">' +
-        '<div class="hint" style="margin-bottom:6px;">원문: ' + escapeHtml(row.raw) + '</div>' +
-        '<div class="hint">업체명' + (row.vendorMatched ? ' (✓업체목록에 있음)' : ' (⚠목록에 없음 — 새 업체로 추가됨)') + '</div>' +
-        '<input type="text" data-krow-vendor="' + i + '" value="' + escapeHtml(row.vendorMatched || row.vendorRaw) + '" style="width:100%; margin-bottom:6px;">' +
+        (row.raw !== '(직접 입력)' ? '<div class="hint" style="margin-bottom:6px;">원문: ' + escapeHtml(row.raw) + '</div>' : '') +
+        '<div class="hint">업체명' + (row.vendorMatched ? ' (✓업체목록에 있음)' : (row.vendorRaw ? ' (⚠목록에 없음 — 새 업체로 추가됨)' : '')) + '</div>' +
+        '<input type="text" list="vendorNameDatalist" data-krow-vendor="' + i + '" value="' + escapeHtml(row.vendorMatched || row.vendorRaw) + '" style="width:100%; margin-bottom:6px;">' +
         '<div class="hint">품목</div>' +
         '<input type="text" data-krow-item="' + i + '" value="' + escapeHtml(row.item) + '" style="width:100%; margin-bottom:6px;">' +
         '<div class="hint">수량</div>' +
@@ -1003,10 +1050,17 @@
   });
   document.getElementById('kakaoAddCloseBtn').addEventListener('click', function(){ garakCloseModal('kakaoAddModal'); });
   garakRegisterModalCloser('kakaoAddModal', function(){ document.getElementById('kakaoAddModal').classList.add('hidden'); });
+  // 카톡 문장 분석 없이, 업체/품목/수량을 바로 손으로 타이핑해서 넣고 싶을 때 쓰는 빈 칸 추가.
+  document.getElementById('kakaoAddManualBtn').addEventListener('click', function(){
+    kakaoParsedRows.push({ raw: '(직접 입력)', vendorRaw: '', vendorMatched: null, item: '', qty: '' });
+    renderKakaoReview();
+    var inputs = document.querySelectorAll('[data-krow-vendor]');
+    var last = inputs[inputs.length - 1];
+    if (last) last.focus();
+  });
   document.getElementById('kakaoAddParseBtn').addEventListener('click', function(){
     var text = document.getElementById('kakaoAddText').value || '';
-    var lines = text.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
-    kakaoParsedRows = lines.map(parseKakaoLine).filter(Boolean);
+    kakaoParsedRows = parseKakaoBlock(text);
     if (!kakaoParsedRows.length) alert('분석할 내용이 없어요. 줄바꿈으로 여러 개 넣을 수 있어요.');
     renderKakaoReview();
   });
@@ -2051,6 +2105,7 @@
   }
 
   renderVendorList();
+  renderVendorDatalist();
 
   // ---------- 탭 전환 (딜리버리 앱과 같은 방식) ----------
   var TAB_IDS = ['tabFile', 'tabToday', 'tabRegister', 'tabVendorList'];
