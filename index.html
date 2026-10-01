@@ -80,6 +80,8 @@
   .excel-item .qty{ font-size:0.875em; color:var(--sub); flex:none; }
   .excel-item.qty-warn .qty{ color:var(--danger); font-weight:800; }
   .excel-item.qty-warn .itext{ font-weight:800; }
+  .excel-item.kakao-added{ background:rgba(255,196,0,0.12); border-left:3px solid #ffc400; border-radius:6px; padding-left:0.4em; margin-left:-0.15em; }
+  .excel-item.kakao-added .itext{ color:#ffb300; font-weight:700; }
   #excelDetailBody{ touch-action:pan-y; }
   .excel-selectall{ display:flex; align-items:center; gap:8px; padding:8px 12px; background:#0b1220; border-top:1px solid var(--line); font-size:14px; font-weight:700; }
   .excel-selectall input[type=checkbox]{ width:20px; height:20px; }
@@ -1147,7 +1149,7 @@
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
       var key = pickKey(v.name, i, it.text);
       var picked = !!excelPicks[key];
-      return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + '">' +
+      return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
         '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
         '<span class="itext">' + (it.fromKakao ? '💬 ' : '') + escapeHtml(it.text) + '</span>' +
         '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
