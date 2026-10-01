@@ -514,10 +514,18 @@
     withIdx.sort(function(a, b){ return a.key - b.key; });
     return withIdx.map(function(x){ return x.v; });
   }
+  // 예전에 저장된 데이터에 "특이사항"/"거래처 출고목록" 같은 메모용 시트가 이미 그룹으로
+  // 끼어있을 수 있으니, 불러올 때마다 한 번 더 걸러준다.
+  var NON_VENDOR_GROUP_NAMES = ['특이사항', '거래처 출고목록', '출고목록'];
   function loadExcelData(){
     var savedDate = localStorage.getItem(DATE_KEY);
     if (savedDate !== todayStr()) return null;
-    try { return JSON.parse(localStorage.getItem(EXCEL_DATA_KEY) || 'null'); } catch(e){ return null; }
+    var data;
+    try { data = JSON.parse(localStorage.getItem(EXCEL_DATA_KEY) || 'null'); } catch(e){ return null; }
+    if (data && data.length){
+      data = data.filter(function(g){ return NON_VENDOR_GROUP_NAMES.indexOf(g.groupName) === -1; });
+    }
+    return data;
   }
   function saveExcelData(data){
     try {
@@ -867,9 +875,13 @@
         var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
         var laneSheetEntries = []; // [{sheetName, lanes}] — 가락시장류 시트
         var jlmGroups = [];
+        // 엑셀에 섞여있는 "특이사항"/"거래처 출고목록" 같은 메모·요약용 시트는 실제 거래처가
+        // 아니니까 그냥 건너뛴다. 가락시장/제이엘엠처럼 진짜 품목 데이터가 있는 시트만 읽음.
         wb.SheetNames.forEach(function(sheetName){
           var sheet = wb.Sheets[sheetName];
           if (!sheet || !sheet['!ref']) return;
+          var trimmedName = sheetName.trim();
+          if (NON_VENDOR_GROUP_NAMES.indexOf(trimmedName) !== -1) return;
           if (sheetName.indexOf('가락') !== -1){
             var lanes = scanLaneSheet(sheet);
             if (lanes.length) laneSheetEntries.push({ sheetName: sheetName, lanes: lanes });
