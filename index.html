@@ -562,13 +562,15 @@
           }
           continue;
         }
-        if (!qtyV || qtyV === '품목' || qtyV === '수량' || isMarkerOnlyText(qtyV)){
-          var matched = matchVendorName(itemV);
-          if (matched){
-            lane.push({ kind: 'vendor', text: matched, row: r });
-          } else {
-            lane.push({ kind: 'ambiguous', text: itemV, row: r, resolution: looksLikeNoteText(itemV) ? 'note' : 'vendor' });
-          }
+        // 업체목록(vendorOrder)에 정식으로 등록된 이름이면, 옆 수량칸에 뭐가 들어있든(경리가 실수로
+        // 찍은 "*" 같은 표시, 엉뚱한 숫자/글자 등) 무조건 업체명으로 확정한다. 등록된 업체명은
+        // 애초에 수량칸이 비어있어야 정상이라, 거기 뭔가 적혀있다고 품목으로 오인하면 안 됨.
+        // (업체목록에 없는 이름일 때만 기존처럼 수량칸 유무로 업체/품목을 가려서 물어본다.)
+        var matchedVendor = matchVendorName(itemV);
+        if (matchedVendor){
+          lane.push({ kind: 'vendor', text: matchedVendor, row: r });
+        } else if (!qtyV || qtyV === '품목' || qtyV === '수량' || isMarkerOnlyText(qtyV)){
+          lane.push({ kind: 'ambiguous', text: itemV, row: r, resolution: looksLikeNoteText(itemV) ? 'note' : 'vendor' });
         } else {
           lane.push({ kind: 'item', text: itemV, qty: qtyV, row: r });
         }
