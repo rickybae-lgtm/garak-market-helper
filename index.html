@@ -307,6 +307,21 @@
   var CROPS_KEY = 'garak.crops.v1';
   var DATE_KEY = 'garak.date.v1';
   var PHONE_KEY = 'garak.vendorPhones.v1';
+  var ALIAS_KEY = 'garak.vendorAliases.v1';
+
+  // 업체명 별칭 — 경리가 정식 이름 대신 다르게(오타·축약·엉뚱한 이름 등) 적는 경우에도 같은
+  // 업체로 자동 인식시키기 위함. 정식 이름은 그대로 두고, 쉼표로 구분해서 여러 개 등록 가능.
+  function loadAliases(){
+    try { return JSON.parse(localStorage.getItem(ALIAS_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveAliases(map){
+    try { localStorage.setItem(ALIAS_KEY, JSON.stringify(map)); } catch(e){}
+  }
+  function getAliasList(vendorName){
+    var raw = (vendorAliases[vendorName] || '').trim();
+    if (!raw) return [];
+    return raw.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  }
 
   function loadPhones(){
     try { return JSON.parse(localStorage.getItem(PHONE_KEY) || '{}'); } catch(e){ return {}; }
@@ -387,7 +402,10 @@
 
   var vendorOrder = loadVendorOrder(); // ["다농마트","우주식품", ...]
   var vendorPhones = loadPhones(); // { "다농마트": "0224070450", ... }
+  var vendorAliases = loadAliases(); // { "대흥수산": "대양수산, 대흥상회" }
   var editingPhoneIndex = null;
+  var editingAliasIndex = null;
+  var editingNameIndex = null;
   var crops = loadCrops(); // { "다농마트": {dataUrl, srcIndex}, ... }
   var sourceImages = []; // [{img, url}] 오늘 올린 원본 사진들
   var currentSourceIndex = 0;
@@ -496,12 +514,16 @@
     return s;
   }
 
-  // 수량칸에 숫자/글자 없이 "*", "-", "○", "✓" 같은 표시(체크·강조 목적)만 달랑 하나 있는 경우.
-  // 이런 건 실제 수량이 아니라 업체명 옆에 사람이 그냥 찍어둔 표시일 뿐인데, 수량칸에 "뭔가 있다"고만
-  // 보면 업체명 줄이 품목 줄로 잘못 인식돼버림(예: "대호"라는 업체명 옆 수량칸에 "*"만 있으면
-  // "대호"가 업체명이 아니라 수량 "*"짜리 품목으로 잘못 읽혀버림).
+  // 수량칸이 "*"만 달랑 있거나, "*2"/"2개*"처럼 숫자·글자랑 "*" 같은 이상한 기호가 섞여 있는 경우.
+  // 정상적인 수량은 숫자/한글/영문/공백/점/하이픈/괄호/슬래시/퍼센트 정도만 쓰이므로, 그 밖의
+  // 기호(별표 등)가 하나라도 섞여 있으면 진짜 수량이 아니라 경리가 그냥 찍어둔 표시일 가능성이
+  // 높다고 보고 "수량칸이 비어있는 것"처럼 취급한다. 안 그러면 업체명 줄이 품목으로 잘못
+  // 인식돼버림(예: 업체목록에 없는 이름인데 옆 수량칸에 "*2"가 있으면, 사용자에게 물어보지도
+  // 않고 그냥 앞 업체의 품목으로 조용히 삼켜버리는 사고가 날 수 있음).
   function isMarkerOnlyText(s){
-    return !!s && !/[0-9\p{L}]/u.test(s);
+    if (!s) return false;
+    if (!/[0-9\p{L}]/u.test(s)) return true; // 숫자/글자 없이 기호만 있음
+    return /[^0-9A-Za-z가-힣.\-()\/%\s]/.test(s); // 숫자/글자가 있어도 "*" 같은 비정상 기호가 섞여있음
   }
 
   // 가락시장 시트: A,C,E(그리고 있으면 그 뒤로도 두 칸씩)를 각각 하나의 "레인"으로 보고,
@@ -523,19 +545,32 @@
   // 수량 없는 줄의 텍스트가 "업체목록"(vendorOrder)에 등록된 업체명과 같은지 확인.
   // sortVendorsByVendorList와 같은 방식: 공백/괄호(전화번호 등) 지우고 비교, 정확히 안 맞으면 부분 일치까지 확인.
   // 맞으면 업체목록에 등록된 정식 이름을 돌려줌(엑셀에 적힌 표기가 조금 달라도 목록 이름으로 통일됨).
+  // 업체별로 "정식 이름 + 등록해둔 별칭들"을 전부 정규화해서 돌려줌. 별칭도 정식 이름과
+  // 똑같이 매칭 대상이 되므로, 경리가 다르게 적어도(오타, 줄임말, 엉뚱한 다른 이름 등) 같은
+  // 업체로 인식시킬 수 있음(정식 이름 자체는 안 바꿔도 됨).
+  function vendorMatchCandidates(vendorName){
+    var list = [normalizeVendorName(vendorName)];
+    getAliasList(vendorName).forEach(function(a){
+      var n = normalizeVendorName(a);
+      if (n) list.push(n);
+    });
+    return list;
+  }
   function matchVendorName(text){
     var norm = normalizeVendorName(text);
     if (!norm) return null;
-    var normList = vendorOrder.map(normalizeVendorName);
-    var idx = normList.indexOf(norm);
-    if (idx !== -1) return vendorOrder[idx];
-    // 부분 일치는 "셀에 적힌 글자가 등록된 업체명 전체를 포함하는" 방향으로만 허용한다
+    for (var i = 0; i < vendorOrder.length; i++){
+      if (vendorMatchCandidates(vendorOrder[i]).indexOf(norm) !== -1) return vendorOrder[i];
+    }
+    // 부분 일치는 "셀에 적힌 글자가 등록된 업체명(또는 별칭) 전체를 포함하는" 방향으로만 허용한다
     // (예: "우주 식품(02-407-0450)"이 등록된 "우주식품"을 통째로 포함). 반대 방향(등록된 업체명이
     // 셀 글자를 포함)까지 허용하면, "이탈리안드레싱(위쉬본)..." 같은 긴 품목명 안에 짧은 업체명 한
     // 조각이 우연히 들어있을 때도 업체로 잘못 인식해버리는 문제가 있었음.
     for (var k = 0; k < vendorOrder.length; k++){
-      var nk = normList[k];
-      if (nk && norm.indexOf(nk) !== -1) return vendorOrder[k];
+      var candidates = vendorMatchCandidates(vendorOrder[k]);
+      for (var c = 0; c < candidates.length; c++){
+        if (candidates[c] && norm.indexOf(candidates[c]) !== -1) return vendorOrder[k];
+      }
     }
     return null;
   }
@@ -1378,17 +1413,45 @@
             : '<button class="btn sm" data-editphone="' + i + '">☎ 전화번호 추가</button>') +
           '</div>';
       }
+      var aliases = getAliasList(name);
+      var nameHtml, aliasHtml;
+      if (editingNameIndex === i){
+        nameHtml = '<div class="name">' +
+          '<div class="phone-row">' +
+            '<input type="text" id="nameInput' + i + '" value="' + escapeHtml(name) + '" placeholder="정식 업체명">' +
+            '<button class="btn sm accent" data-savename="' + i + '">저장</button>' +
+            '<button class="btn sm" data-cancelname="' + i + '">취소</button>' +
+          '</div></div>';
+      } else {
+        nameHtml = '<div class="name">' + escapeHtml(name) +
+          ' <button class="btn sm" data-editname="' + i + '">이름수정</button>' +
+          '<div class="status">' + (has ? '자리 표시됨' : (sourceImages.length ? '아직 안 함' : '오늘 사진부터 올려주세요')) + '</div></div>';
+      }
+      if (editingAliasIndex === i){
+        aliasHtml = '<div class="phone-row">' +
+          '<input type="text" id="aliasInput' + i + '" value="' + escapeHtml(aliases.join(', ')) + '" placeholder="예: 대양수산, 대흥상회 (쉼표로 여러개)">' +
+          '<button class="btn sm accent" data-savealias="' + i + '">저장</button>' +
+          '<button class="btn sm" data-cancelalias="' + i + '">취소</button>' +
+          '</div>';
+      } else {
+        aliasHtml = '<div class="phone-row">' +
+          (aliases.length
+            ? '<span class="status">별칭: ' + escapeHtml(aliases.join(', ')) + '</span><button class="btn sm" data-editalias="' + i + '">별칭수정</button>'
+            : '<button class="btn sm" data-editalias="' + i + '">🏷 별칭 추가</button>') +
+          '</div>';
+      }
       row.innerHTML =
         '<div class="order-arrows">' +
           '<button data-up="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>▲</button>' +
           '<button data-down="' + i + '" ' + (i === vendorOrder.length - 1 ? 'disabled' : '') + '>▼</button>' +
         '</div>' +
         '<div class="badge-dot">' + (has ? '✓' : '') + '</div>' +
-        '<div class="name">' + escapeHtml(name) + '<div class="status">' + (has ? '자리 표시됨' : (sourceImages.length ? '아직 안 함' : '오늘 사진부터 올려주세요')) + '</div></div>' +
+        nameHtml +
         (has ? '<button class="btn sm accent" data-view="' + i + '">보기</button>' : '') +
         '<button class="btn sm" data-mark="' + i + '" ' + (sourceImages.length ? '' : 'disabled') + '>' + (has ? '다시 그리기' : '자리 표시') + '</button>' +
         '<button class="btn sm danger" data-del="' + i + '">삭제</button>' +
-        phoneHtml;
+        phoneHtml +
+        aliasHtml;
       vendorListEl.appendChild(row);
     });
 
@@ -1415,9 +1478,47 @@
     vendorListEl.querySelectorAll('[data-frompicker]').forEach(function(b){
       b.addEventListener('click', function(){ pickContactPhone(+this.dataset.frompicker); });
     });
-    vendorListEl.querySelectorAll('.phone-row input').forEach(function(inp){
+    vendorListEl.querySelectorAll('input[id^="phoneInput"]').forEach(function(inp){
       inp.addEventListener('keydown', function(evt){
         if (evt.key === 'Enter'){ evt.preventDefault(); savePhoneFromRow.call(vendorListEl.querySelector('[data-savephone="' + editingPhoneIndex + '"]')); }
+      });
+    });
+    vendorListEl.querySelectorAll('[data-editname]').forEach(function(b){
+      b.addEventListener('click', function(){
+        editingNameIndex = +this.dataset.editname;
+        renderVendorList();
+        var inp = document.getElementById('nameInput' + editingNameIndex);
+        if (inp) inp.focus();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-cancelname]').forEach(function(b){
+      b.addEventListener('click', function(){ editingNameIndex = null; renderVendorList(); });
+    });
+    vendorListEl.querySelectorAll('[data-savename]').forEach(function(b){
+      b.addEventListener('click', saveNameFromRow);
+    });
+    vendorListEl.querySelectorAll('input[id^="nameInput"]').forEach(function(inp){
+      inp.addEventListener('keydown', function(evt){
+        if (evt.key === 'Enter'){ evt.preventDefault(); saveNameFromRow.call(vendorListEl.querySelector('[data-savename="' + editingNameIndex + '"]')); }
+      });
+    });
+    vendorListEl.querySelectorAll('[data-editalias]').forEach(function(b){
+      b.addEventListener('click', function(){
+        editingAliasIndex = +this.dataset.editalias;
+        renderVendorList();
+        var inp = document.getElementById('aliasInput' + editingAliasIndex);
+        if (inp) inp.focus();
+      });
+    });
+    vendorListEl.querySelectorAll('[data-cancelalias]').forEach(function(b){
+      b.addEventListener('click', function(){ editingAliasIndex = null; renderVendorList(); });
+    });
+    vendorListEl.querySelectorAll('[data-savealias]').forEach(function(b){
+      b.addEventListener('click', saveAliasFromRow);
+    });
+    vendorListEl.querySelectorAll('input[id^="aliasInput"]').forEach(function(inp){
+      inp.addEventListener('keydown', function(evt){
+        if (evt.key === 'Enter'){ evt.preventDefault(); saveAliasFromRow.call(vendorListEl.querySelector('[data-savealias="' + editingAliasIndex + '"]')); }
       });
     });
     vendorListEl.querySelectorAll('[data-del]').forEach(function(b){
@@ -1458,6 +1559,39 @@
     if (val) vendorPhones[name] = val; else delete vendorPhones[name];
     savePhones(vendorPhones);
     editingPhoneIndex = null;
+    renderVendorList();
+  }
+
+  // 업체명을 수정하면, 그 이름으로 저장해둔 사진 자리 표시/전화번호/별칭도 전부 새 이름으로
+  // 같이 옮겨줘야 안 날아감(그냥 vendorOrder 글자만 바꾸면 crops/vendorPhones/vendorAliases가
+  // 예전 이름에 묶인 채로 못 찾게 됨).
+  function saveNameFromRow(){
+    var i = +this.dataset.savename;
+    var oldName = vendorOrder[i];
+    var inp = document.getElementById('nameInput' + i);
+    var newName = ((inp && inp.value) || '').trim();
+    if (!newName || newName === oldName){
+      editingNameIndex = null;
+      renderVendorList();
+      return;
+    }
+    vendorOrder[i] = newName;
+    if (crops[oldName] !== undefined){ crops[newName] = crops[oldName]; delete crops[oldName]; }
+    if (vendorPhones[oldName] !== undefined){ vendorPhones[newName] = vendorPhones[oldName]; delete vendorPhones[oldName]; }
+    if (vendorAliases[oldName] !== undefined){ vendorAliases[newName] = vendorAliases[oldName]; delete vendorAliases[oldName]; }
+    saveVendorOrder(vendorOrder); saveCrops(crops); savePhones(vendorPhones); saveAliases(vendorAliases);
+    editingNameIndex = null;
+    renderVendorList();
+  }
+
+  function saveAliasFromRow(){
+    var i = +this.dataset.savealias;
+    var name = vendorOrder[i];
+    var inp = document.getElementById('aliasInput' + i);
+    var val = ((inp && inp.value) || '').trim();
+    if (val) vendorAliases[name] = val; else delete vendorAliases[name];
+    saveAliases(vendorAliases);
+    editingAliasIndex = null;
     renderVendorList();
   }
 
