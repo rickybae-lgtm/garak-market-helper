@@ -80,8 +80,6 @@
   .excel-item{ display:flex; align-items:flex-start; gap:0.5em; padding:0.4em 0.15em; border-top:1px solid var(--line); }
   .excel-item:first-of-type{ border-top:none; }
   .excel-item input[type=checkbox]{ width:1.25em; height:1.25em; margin-top:0.05em; flex:none; }
-  .hl-tap{ border-radius:5px; padding:2px 4px; margin:-2px -4px; cursor:pointer; }
-  .chk-wrap{ flex:none; display:flex; align-items:center; padding:0.3em; margin:-0.3em 0 -0.3em -0.3em; }
   .excel-item-multi{ padding:0.4em 0.15em; border-top:1px solid var(--line); }
   .excel-item-multi:first-of-type{ border-top:none; }
   .excel-item-multi-head{ display:flex; align-items:flex-start; gap:0.5em; margin-bottom:4px; }
@@ -472,11 +470,6 @@
   // 거래처별 품목 목록을 자동으로 만들어준다. 사진 자르기 작업을 통째로 건너뛸 수 있음.
   var EXCEL_DATA_KEY = 'garak.excelData.v1';
   var EXCEL_PICK_KEY = 'garak.excelPicks.v1';
-  var EXCEL_HIGHLIGHT_KEY = 'garak.excelHighlights.v1';
-  // 형광펜 표시용 색상 팔레트. 품목 글자를 탭할 때마다 이 순서대로 돌아가며 바뀐다(마지막 다음엔
-  // 다시 "표시 없음"으로). 한 품목에 종류가 여러 개 섞여 있을 때(예: 같은 "삼겹살"인데 업체가
-  // 둘 이상이거나 포장 단위가 다른 경우) 색으로 구분해두려는 용도.
-  var HIGHLIGHT_COLORS = ['#fff59d', '#ffab91', '#a5d6a7', '#90caf9', '#ce93d8'];
   // 별도 버튼 없이, 파싱된 거래처를 항상 "업체목록"(vendorOrder, 층별로 미리 정리해둔 순서)
   // 기준으로 자동 정렬한다. 업체목록에 없는(새로 생긴) 거래처는 원래 엑셀에 나온 순서 그대로
   // 맨 뒤에 붙는다. 업체목록 자체를 층별로 한 번 정리해두면 매일 자동으로 그 순서를 따라간다.
@@ -563,18 +556,8 @@
   function saveExcelPicks(map){
     try { localStorage.setItem(EXCEL_PICK_KEY, JSON.stringify(map)); } catch(e){}
   }
-  function loadExcelHighlights(){
-    var savedDate = localStorage.getItem(DATE_KEY);
-    if (savedDate !== todayStr()) return {};
-    try { return JSON.parse(localStorage.getItem(EXCEL_HIGHLIGHT_KEY) || '{}'); } catch(e){ return {}; }
-  }
-  function saveExcelHighlights(map){
-    try { localStorage.setItem(EXCEL_HIGHLIGHT_KEY, JSON.stringify(map)); } catch(e){}
-  }
-
   var excelGroups = loadExcelData(); // [{groupName, vendors:[{name, items:[{text, qty}]}]}]
   var excelPicks = loadExcelPicks(); // { "거래처명||품목명": true }
-  var excelHighlights = loadExcelHighlights(); // { "거래처명||i||품목명": "#색상코드" }
   var excelDetailOpenName = null; // 지금 "품목보기"로 열려있는 거래처 이름(그룹명 포함)
 
   function clean(v){ return (v === null || v === undefined) ? '' : String(v).trim(); }
@@ -874,11 +857,9 @@
     }
     excelGroups = groups;
     excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
-    excelHighlights = {}; // 형광펜 표시도 품목 순서가 달라질 수 있어서 같이 초기화
     excelDetailOpenName = null;
     saveExcelData(excelGroups);
     saveExcelPicks(excelPicks);
-    saveExcelHighlights(excelHighlights);
     renderExcelList();
     renderVendorDatalist();
     // 원본이랑 자동인식 결과를 사람이 일일이 대조 안 해도 되도록, 파싱 중에 모아둔
@@ -1293,33 +1274,22 @@
     document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
       (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) : '');
 
-    // 작은 🖊 버튼 대신, 품목 글자(수량 글자) 부분을 손가락으로 직접 탭하면 그 자리에서 바로
-    // 색이 칠해지는 방식으로 바꿈(버튼이 너무 작아서 묶음별로 따로 칠하기 불편하다는 피드백).
-    // 탭한 자리(품목 전체 줄, 또는 묶음 하나)만 색이 바뀌고 체크박스는 그대로 안 건드림.
     bodyEl.innerHTML = v.items.map(function(it, i){
       var key = pickKey(v.name, i, it.text);
-      var hlColor = excelHighlights[key] || '';
-      var hlStyle = hlColor ? ' style="background:' + hlColor + '; color:#111;"' : '';
       var parts = qtyParts(it.qty);
 
       if (parts){
         // "2kg+5kg+5kg..."처럼 묶음 여러 개면, 한 줄짜리 체크박스 대신 묶음마다 따로 체크할 수
         // 있게 쪼개서 보여준다(묶음별로 다른 시간에 들어오는 경우가 많아서 한 번에 다 체크해버리면
-        // 실제로 받은 것/안 받은 것 구분이 안 됨). 형광펜도 묶음(2/3/5 등) 하나하나를 각각 탭해서
-        // 따로 칠할 수 있음.
+        // 실제로 받은 것/안 받은 것 구분이 안 됨).
         var allDone = isItemFullyPicked(key, parts);
         var subRows = parts.map(function(part, pi){
           var subKey = subPickKey(key, pi);
           var subPicked = !!excelPicks[subKey];
-          var subHlColor = excelHighlights[subKey] || '';
-          var subHlStyle = subHlColor ? ' style="background:' + subHlColor + '; color:#111;"' : '';
-          // 체크박스는 자기만의 작은 label로 감싸고, 색칠하는 글자는 그 label 밖에 완전히
-          // 따로 둔다(같은 label 안에 있으면 글자를 탭해도 브라우저가 체크박스까지 같이
-          // 토글시켜버려서, 기기에 따라 색칠이 전혀 안 먹는 것처럼 보이는 문제가 있었음).
-          return '<div class="excel-subitem' + (subPicked ? ' picked' : '') + '">' +
-            '<label class="chk-wrap"><input type="checkbox" data-pickkey="' + escapeHtml(subKey) + '" ' + (subPicked ? 'checked' : '') + '></label>' +
-            '<span class="qty hl-tap" data-hlkey="' + escapeHtml(subKey) + '"' + subHlStyle + '>' + escapeHtml(part) + '</span>' +
-            '</div>';
+          return '<label class="excel-subitem' + (subPicked ? ' picked' : '') + '">' +
+            '<input type="checkbox" data-pickkey="' + escapeHtml(subKey) + '" ' + (subPicked ? 'checked' : '') + '>' +
+            '<span class="qty">' + escapeHtml(part) + '</span>' +
+            '</label>';
         }).join('');
         return '<div class="excel-item-multi' + (allDone ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
           '<div class="excel-item-multi-head">' +
@@ -1332,13 +1302,11 @@
       var qtyNum = parseInt(it.qty, 10);
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
       var picked = !!excelPicks[key];
-      // 여기도 마찬가지로 체크박스는 작은 label로만 감싸고, 색칠 대상인 품목 글자는 그 바깥에
-      // 완전히 독립적으로 둔다.
-      return '<div class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
-        '<label class="chk-wrap"><input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '></label>' +
-        '<span class="itext hl-tap" data-hlkey="' + escapeHtml(key) + '"' + hlStyle + '>' + (it.fromKakao ? '💬 ' : '') + escapeHtml(it.text) + '</span>' +
+      return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
+        '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
+        '<span class="itext">' + (it.fromKakao ? '💬 ' : '') + escapeHtml(it.text) + '</span>' +
         '<span class="qty">' + (isMulti ? '⚠️ ' : '') + escapeHtml(it.qty) + '</span>' +
-        '</div>';
+        '</label>';
     }).join('');
 
     function syncSelectAllCb(){
@@ -1353,22 +1321,6 @@
         // 이 줄 하나만 독립적으로 체크/해제. 이름이 같은 다른 줄에는 영향 없음.
         if (this.checked) excelPicks[this.dataset.pickkey] = true; else delete excelPicks[this.dataset.pickkey];
         saveExcelPicks(excelPicks);
-        renderExcelDetail();
-      });
-    });
-    // 글자(품목명, 또는 묶음 수량)를 탭할 때마다 "표시 없음 → 노랑 → 주황 → 초록 → 파랑 → 보라
-    // → 표시 없음" 순서로 그 글자 부분만 형광펜 색이 바뀐다. label 안에 있어서 그냥 두면 탭했을 때
-    // 체크박스까지 같이 토글돼버리니, preventDefault + stopPropagation으로 체크는 안 건드리게 막음.
-    bodyEl.querySelectorAll('.hl-tap').forEach(function(el){
-      el.addEventListener('click', function(e){
-        e.preventDefault();
-        e.stopPropagation();
-        var key = this.dataset.hlkey;
-        var cur = excelHighlights[key] || '';
-        var idx = HIGHLIGHT_COLORS.indexOf(cur);
-        var next = (idx === -1) ? HIGHLIGHT_COLORS[0] : (HIGHLIGHT_COLORS[idx + 1] || '');
-        if (next) excelHighlights[key] = next; else delete excelHighlights[key];
-        saveExcelHighlights(excelHighlights);
         renderExcelDetail();
       });
     });
