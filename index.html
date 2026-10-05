@@ -772,7 +772,11 @@
           if (cur && cur.items.length){
             var last = cur.items[cur.items.length - 1];
             last.text = last.text + ' (' + tok.text + ')';
-          } else {
+          } else if (!tok.autoResolved){
+            // 사용자한테 직접 물어봐서 "추가설명"으로 고른 경우만 경고함. 안 물어보고 조용히
+            // 넘어가기로 한 줄(autoResolved — 시트 제목, "다농 마트" 같은 상단 구분줄 등)은
+            // 애초에 "물어볼 필요도 없이 결과가 똑같다"고 판단해서 건너뛴 거라, 거기다 대고
+            // "품목이 빠졌다"고 경고하면 오히려 헷갈림(실제로 아무 품목도 안 빠졌음).
             issues.push((tok.row + 1) + '행: "' + tok.text + '" — 추가설명으로 붙일 앞 품목이 없어서 빠졌어요.');
           }
         } else if (tok.kind === 'ambiguous' && tok.resolution === 'item'){
