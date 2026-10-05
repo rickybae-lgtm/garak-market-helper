@@ -89,6 +89,10 @@
   .excel-subitem input[type=checkbox]{ width:1.15em; height:1.15em; flex:none; }
   .excel-subitem .qty{ font-size:0.85em; }
   .excel-subitem.picked .qty{ text-decoration:line-through; color:var(--sub); }
+  .chk-wrap{ flex:none; display:flex; align-items:center; padding:0.3em; margin:-0.3em 0 -0.3em -0.3em; }
+  .mark-plus{ opacity:0.6; margin:0 1px; }
+  .mark-tap{ padding:1px 4px; border-radius:999px; border:2px solid transparent; cursor:pointer; }
+  .mark-tap.marked{ border-color:#ffc400; font-weight:800; }
   .excel-item .itext{ flex:1; font-size:0.875em; }
   .excel-item.picked .itext{ text-decoration:line-through; color:var(--sub); }
   .excel-item .qty{ font-size:0.875em; color:var(--sub); flex:none; }
@@ -470,6 +474,7 @@
   // 거래처별 품목 목록을 자동으로 만들어준다. 사진 자르기 작업을 통째로 건너뛸 수 있음.
   var EXCEL_DATA_KEY = 'garak.excelData.v1';
   var EXCEL_PICK_KEY = 'garak.excelPicks.v1';
+  var EXCEL_MARK_KEY = 'garak.excelMarks.v1';
   // 별도 버튼 없이, 파싱된 거래처를 항상 "업체목록"(vendorOrder, 층별로 미리 정리해둔 순서)
   // 기준으로 자동 정렬한다. 업체목록에 없는(새로 생긴) 거래처는 원래 엑셀에 나온 순서 그대로
   // 맨 뒤에 붙는다. 업체목록 자체를 층별로 한 번 정리해두면 매일 자동으로 그 순서를 따라간다.
@@ -556,8 +561,21 @@
   function saveExcelPicks(map){
     try { localStorage.setItem(EXCEL_PICK_KEY, JSON.stringify(map)); } catch(e){}
   }
+  // 체크(픽킹 완료)랑은 완전히 별개로, 글자 위에 손으로 동그라미 쳐두는 표시. 엑셀에 품목칸/
+  // 수량칸이 뒤바뀐 업체(예: 충무/금길수산)처럼 자동으로 "수량 묶음"을 못 알아보는 경우에,
+  // 사람이 직접 숫자마다 동그라미를 쳐서 표시해두는 용도. 토글 방식이라 같은 자리를 다시
+  // 탭하면 지워짐(별도 지우개 없이 탭한 자리가 곧 지우개).
+  function loadExcelMarks(){
+    var savedDate = localStorage.getItem(DATE_KEY);
+    if (savedDate !== todayStr()) return {};
+    try { return JSON.parse(localStorage.getItem(EXCEL_MARK_KEY) || '{}'); } catch(e){ return {}; }
+  }
+  function saveExcelMarks(map){
+    try { localStorage.setItem(EXCEL_MARK_KEY, JSON.stringify(map)); } catch(e){}
+  }
   var excelGroups = loadExcelData(); // [{groupName, vendors:[{name, items:[{text, qty}]}]}]
   var excelPicks = loadExcelPicks(); // { "거래처명||품목명": true }
+  var excelMarks = loadExcelMarks(); // { "거래처명||i||품목명::필드::토큰순번": true }
   var excelDetailOpenName = null; // 지금 "품목보기"로 열려있는 거래처 이름(그룹명 포함)
 
   function clean(v){ return (v === null || v === undefined) ? '' : String(v).trim(); }
@@ -857,9 +875,11 @@
     }
     excelGroups = groups;
     excelPicks = {}; // 새 파일을 올리면 오늘 체크 기록은 초기화
+    excelMarks = {}; // 동그라미 표시도 품목 순서가 달라질 수 있어서 같이 초기화
     excelDetailOpenName = null;
     saveExcelData(excelGroups);
     saveExcelPicks(excelPicks);
+    saveExcelMarks(excelMarks);
     renderExcelList();
     renderVendorDatalist();
     // 원본이랑 자동인식 결과를 사람이 일일이 대조 안 해도 되도록, 파싱 중에 모아둔
@@ -1274,6 +1294,22 @@
     document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
       (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) : '');
 
+    // "+"로 쪼개지는 글자가 있으면(품목칸이든 수량칸이든) 그 토큰 하나하나를 손가락으로 탭해서
+    // 동그라미 칠 수 있게 함. 체크(픽킹)랑은 완전히 별개의 표시라서, 엑셀에서 품목칸/수량칸이
+    // 뒤바뀐 업체(예: 충무/금길수산)처럼 자동으로 "수량 묶음"을 못 알아보는 경우에도 사람이 직접
+    // 숫자마다 표시해둘 수 있음. 같은 자리를 다시 탭하면 지워짐(토글이라 별도 지우개 버튼 없이도
+    // 탭한 자리가 곧 지우개).
+    function renderMarkableText(baseKey, field, text){
+      var raw = String(text || '');
+      var tokens = raw.split('+');
+      if (tokens.length < 2) return escapeHtml(raw);
+      return tokens.map(function(tok, ti){
+        var markKey = baseKey + '::mark::' + field + '::' + ti;
+        var marked = !!excelMarks[markKey];
+        return '<span class="mark-tap' + (marked ? ' marked' : '') + '" data-markkey="' + escapeHtml(markKey) + '">' + escapeHtml(tok) + '</span>';
+      }).join('<span class="mark-plus">+</span>');
+    }
+
     bodyEl.innerHTML = v.items.map(function(it, i){
       var key = pickKey(v.name, i, it.text);
       var parts = qtyParts(it.qty);
@@ -1302,6 +1338,20 @@
       var qtyNum = parseInt(it.qty, 10);
       var isMulti = !isNaN(qtyNum) && qtyNum >= 2;
       var picked = !!excelPicks[key];
+      // 품목 글자나 수량 글자 어느 쪽이든 "+"로 쪼개지는 토큰이 있는 줄만(충무/금길수산처럼 칸이
+      // 뒤바뀐 경우 포함) 체크박스를 따로 떼어내고 글자를 토큰별로 탭해서 동그라미 칠 수 있게
+      // 한다. 그런 게 전혀 없는 보통 줄은 예전처럼 줄 전체를 탭해도 체크되는 label 구조 그대로
+      // 둬서, 평소 쓰던 "아무 데나 탭해서 체크"가 그대로 유지되게 함(위험 최소화).
+      var needsMarking = it.text.indexOf('+') !== -1 || String(it.qty || '').indexOf('+') !== -1;
+      if (needsMarking){
+        var itextHtml = renderMarkableText(key, 'text', it.text);
+        var qtyHtml = renderMarkableText(key, 'qty', it.qty);
+        return '<div class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
+          '<label class="chk-wrap"><input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '></label>' +
+          '<span class="itext">' + (it.fromKakao ? '💬 ' : '') + itextHtml + '</span>' +
+          '<span class="qty">' + (isMulti ? '⚠️ ' : '') + qtyHtml + '</span>' +
+          '</div>';
+      }
       return '<label class="excel-item' + (isMulti ? ' qty-warn' : '') + (picked ? ' picked' : '') + (it.fromKakao ? ' kakao-added' : '') + '">' +
         '<input type="checkbox" data-pickkey="' + escapeHtml(key) + '" ' + (picked ? 'checked' : '') + '>' +
         '<span class="itext">' + (it.fromKakao ? '💬 ' : '') + escapeHtml(it.text) + '</span>' +
@@ -1321,6 +1371,18 @@
         // 이 줄 하나만 독립적으로 체크/해제. 이름이 같은 다른 줄에는 영향 없음.
         if (this.checked) excelPicks[this.dataset.pickkey] = true; else delete excelPicks[this.dataset.pickkey];
         saveExcelPicks(excelPicks);
+        renderExcelDetail();
+      });
+    });
+    // 토큰(숫자 등)을 탭하면 동그라미가 켜지고, 다시 탭하면 꺼짐(탭한 자리가 곧 지우개).
+    // 체크박스랑 완전히 분리된 자리에 있어서 체크 상태에는 전혀 영향 없음.
+    bodyEl.querySelectorAll('[data-markkey]').forEach(function(el){
+      el.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        var mkey = this.dataset.markkey;
+        if (excelMarks[mkey]) delete excelMarks[mkey]; else excelMarks[mkey] = true;
+        saveExcelMarks(excelMarks);
         renderExcelDetail();
       });
     });
