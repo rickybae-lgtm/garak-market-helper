@@ -623,7 +623,9 @@
     for (var k = 0; k < vendorOrder.length; k++){
       var candidates = vendorMatchCandidates(vendorOrder[k]);
       for (var c = 0; c < candidates.length; c++){
-        if (candidates[c] && norm.indexOf(candidates[c]) !== -1) return vendorOrder[k];
+        // 업체명(별칭 포함)이 한 글자짜리면 거의 모든 품목명에 우연히 끼어있어서(예: "돼지목살"
+        // 안에 한 글자가 들어있다고 업체로 오인) 위험하니, 두 글자 이상일 때만 부분 일치를 허용함.
+        if (candidates[c] && candidates[c].length >= 2 && norm.indexOf(candidates[c]) !== -1) return vendorOrder[k];
       }
     }
     return null;
