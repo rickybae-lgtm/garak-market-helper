@@ -690,17 +690,35 @@
       var tok = lane[i];
       if (tok.kind !== 'ambiguous') continue;
 
+      // 바로 다음/이전 줄이 또 "추가설명처럼 보이는" ambiguous 줄(예: "두께1cm정도...비정량")이면
+      // 그건 하드 경계가 아니라 그냥 딸려있는 설명일 가능성이 높으니 건너뛰고 그 너머까지 본다.
+      // (여기서 안 건너뛰면, "품목 / 설명줄 / 품목" 순서로 올 때 가운데 설명줄 때문에 양쪽 다
+      // "근처에 품목 없음"으로 착각해서, 진짜로는 물어봐야 할 줄을 조용히 업체로 확정해버리는
+      // 사고가 남 — "돼지목살" 바로 다음 줄이 설명줄이고, 그 다음 다음 줄에 진짜 품목(우민찌 등)이
+      // 있던 실제 사례에서 발견됨).
       var hasFollowingItem = false;
+      var cursorRow = tok.row;
       for (var j = i + 1; j < lane.length; j++){
         var nxt = lane[j];
-        if (nxt.kind === 'item'){ hasFollowingItem = (nxt.row - tok.row) <= ROW_ADJACENCY; break; }
-        if (nxt.kind === 'vendor' || nxt.kind === 'ambiguous') break; // 다음 헤더성 줄이 나오면 거기서 멈춤
+        if (nxt.row - cursorRow > ROW_ADJACENCY) break; // 줄 간격이 벌어지면 더 이상 안 붙어있는 것
+        if (nxt.kind === 'item'){ hasFollowingItem = true; break; }
+        if (nxt.kind === 'vendor') break; // 확실한 새 업체 시작 — 경계로 인정
+        if (nxt.kind === 'ambiguous'){
+          if (nxt.resolution !== 'note') break; // 노트처럼 안 보이면 거기서 진짜 경계로 침
+          cursorRow = nxt.row; // 노트처럼 보이면 건너뛰고 계속 확인
+        }
       }
       var hasPrecedingItem = false;
+      cursorRow = tok.row;
       for (var k = i - 1; k >= 0; k--){
         var prev = lane[k];
-        if (prev.kind === 'item'){ hasPrecedingItem = (tok.row - prev.row) <= ROW_ADJACENCY; break; }
-        if (prev.kind === 'vendor' || prev.kind === 'ambiguous') break; // 그 전 헤더성 줄까지만 확인
+        if (cursorRow - prev.row > ROW_ADJACENCY) break;
+        if (prev.kind === 'item'){ hasPrecedingItem = true; break; }
+        if (prev.kind === 'vendor') break;
+        if (prev.kind === 'ambiguous'){
+          if (prev.resolution !== 'note') break;
+          cursorRow = prev.row;
+        }
       }
 
       // 앞뒤로 바로 붙어있는 품목이 하나도 없으면(위에 붙일 것도, 아래로 딸려올 것도 없음)
@@ -711,7 +729,11 @@
       var matters = hasPrecedingItem || hasFollowingItem;
       if (!matters){
         tok.autoResolved = true;
-        tok.resolution = 'vendor';
+        // 글자 생김새가 "추가설명"처럼 보이는 줄이면 안 물어볼 때도 'note'로 남겨둔다('vendor'로
+        // 바꿔버리면 조용히 새 업체 경계가 생겨서, 혹시 이 줄 뒤로 멀리(바로 옆이 아니게) 떨어진
+        // 진짜 품목들이 있을 때 엉뚱한 업체 밑으로 끊겨 들어가거나 통째로 사라지는 사고가 날 수
+        // 있음 — 'note'는 그런 부작용이 없어서 항상 더 안전한 기본값임).
+        tok.resolution = looksLikeNoteText(tok.text) ? 'note' : 'vendor';
       }
     }
   }
