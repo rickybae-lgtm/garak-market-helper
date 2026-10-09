@@ -636,12 +636,17 @@
     });
     return list;
   }
-  function matchVendorName(text){
+  function matchVendorName(text, allowPartial){
     var norm = normalizeVendorName(text);
     if (!norm) return null;
     for (var i = 0; i < vendorOrder.length; i++){
       if (vendorMatchCandidates(vendorOrder[i]).indexOf(norm) !== -1) return vendorOrder[i];
     }
+    // 부분 일치는 수량이 없는(업체명일 가능성이 있는) 줄에서만 허용한다. 옆 수량칸에 실제
+    // 수량이 적혀있으면 그 줄은 확실히 품목 줄이라, "볼어묵(냉동/유창)(1KG)"처럼 품목명 안에
+    // 업체명 글자(유창)가 우연히 들어있어도 업체로 오인하면 안 됨(실제 사례: 이 때문에 "유창"
+    // 업체가 중간에 또 새로 시작된 것처럼 잘못 쪼개짐).
+    if (!allowPartial) return null;
     // 부분 일치는 "셀에 적힌 글자가 등록된 업체명(또는 별칭) 전체를 포함하는" 방향으로만 허용한다
     // (예: "우주 식품(02-407-0450)"이 등록된 "우주식품"을 통째로 포함). 반대 방향(등록된 업체명이
     // 셀 글자를 포함)까지 허용하면, "이탈리안드레싱(위쉬본)..." 같은 긴 품목명 안에 짧은 업체명 한
@@ -693,7 +698,8 @@
         // 찍은 "*" 같은 표시, 엉뚱한 숫자/글자 등) 무조건 업체명으로 확정한다. 등록된 업체명은
         // 애초에 수량칸이 비어있어야 정상이라, 거기 뭔가 적혀있다고 품목으로 오인하면 안 됨.
         // (업체목록에 없는 이름일 때만 기존처럼 수량칸 유무로 업체/품목을 가려서 물어본다.)
-        var matchedVendor = matchVendorName(itemV);
+        var hasRealQty = !!(qtyV && qtyV !== '품목' && qtyV !== '수량' && !isMarkerOnlyText(qtyV));
+        var matchedVendor = matchVendorName(itemV, !hasRealQty);
         if (matchedVendor){
           lane.push({ kind: 'vendor', text: matchedVendor, row: r });
         } else if (!qtyV || qtyV === '품목' || qtyV === '수량' || isMarkerOnlyText(qtyV)){
@@ -1111,7 +1117,7 @@
         if (vendorPart && restPart){
           var sq1 = kakaoSplitItemQty(restPart);
           currentVendor = vendorPart;
-          rows.push({ raw: rawLine, vendorRaw: vendorPart, vendorMatched: matchVendorName(vendorPart), item: sq1.item, qty: sq1.qty });
+          rows.push({ raw: rawLine, vendorRaw: vendorPart, vendorMatched: matchVendorName(vendorPart, true), item: sq1.item, qty: sq1.qty });
           return;
         }
       }
@@ -1128,14 +1134,14 @@
         var sp = work.indexOf(' ');
         if (sp !== -1){
           var firstWord = work.slice(0, sp).trim();
-          if (matchVendorName(firstWord)){
+          if (matchVendorName(firstWord, true)){
             vendorForRow = firstWord;
             itemText = work.slice(sp + 1).trim();
           }
         }
       }
       var sq2 = kakaoSplitItemQty(itemText);
-      rows.push({ raw: rawLine, vendorRaw: vendorForRow || '', vendorMatched: vendorForRow ? matchVendorName(vendorForRow) : null, item: sq2.item, qty: sq2.qty });
+      rows.push({ raw: rawLine, vendorRaw: vendorForRow || '', vendorMatched: vendorForRow ? matchVendorName(vendorForRow, true) : null, item: sq2.item, qty: sq2.qty });
     });
     return rows;
   }
@@ -1169,7 +1175,7 @@
         var row = kakaoParsedRows[+this.dataset.suggestPick];
         var name = this.dataset.suggestName;
         row.vendorRaw = name;
-        row.vendorMatched = matchVendorName(name);
+        row.vendorMatched = matchVendorName(name, true);
         renderKakaoReview();
       });
     });
@@ -1205,7 +1211,7 @@
       inp.addEventListener('input', function(){
         var i = +this.dataset.krowVendor;
         kakaoParsedRows[i].vendorRaw = this.value;
-        kakaoParsedRows[i].vendorMatched = matchVendorName(this.value);
+        kakaoParsedRows[i].vendorMatched = matchVendorName(this.value, true);
         renderVendorSuggestions(i, this.value);
       });
       inp.addEventListener('focus', function(){ renderVendorSuggestions(+this.dataset.krowVendor, this.value); });
