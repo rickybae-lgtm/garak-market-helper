@@ -1078,7 +1078,7 @@
       b.addEventListener('click', function(){
         var parts = this.dataset.imgshare.split('|');
         var v = findVendorByGroupAndName(parts[0], parts.slice(1).join('|'));
-        if (v) shareVendorImage(v);
+        if (v) shareVendorImage(v, findPhoneForVendor(v.name));
       });
     });
   }
@@ -1326,7 +1326,7 @@
       ' ' + imgBtnHtml(groupName, v.name, '문자');
     var summaryImgBtn = document.querySelector('#excelDetailSummary [data-imgshare]');
     if (summaryImgBtn){
-      summaryImgBtn.addEventListener('click', function(){ shareVendorImage(v); });
+      summaryImgBtn.addEventListener('click', function(){ shareVendorImage(v, detailPhone); });
     }
 
     // "+"로 쪼개지는 글자가 있으면(품목칸이든 수량칸이든) 그 토큰 하나하나를 손가락으로 탭해서
@@ -2169,13 +2169,21 @@
       canvas.toBlob(function(blob){ resolve(blob); }, 'image/png');
     });
   }
-  function shareVendorImage(v){
+  // 주의: 안드로이드/아이폰 둘 다, 웹페이지가 "공유하기" 창을 띄우면서 받는 사람(연락처)까지
+  // 미리 지정해주는 건 허용하지 않는다(브라우저가 막아놓은 보안 제한이라 앱에서 고칠 방법이
+  // 없음 — 카카오톡 공유 버튼 등도 똑같이 "누구에게"는 항상 사람이 직접 고름). 그래서 번호를
+  // 자동으로 맞춰 보낼 수는 없고, 대신 번호를 클립보드에 몰래 복사해둬서 혹시 공유창에 그
+  // 업체가 연락처로 안 떠도 "받는사람" 칸에 바로 붙여넣기만 하면 되게 해둠.
+  function shareVendorImage(v, phone){
     buildVendorImageBlob(v).then(function(blob){
       if (!blob){ alert('이미지를 만들지 못했어요.'); return; }
+      if (phone && navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(phone).catch(function(){});
+      }
       var fileName = v.name + '_품목.png';
       var file = new File([blob], fileName, { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })){
-        navigator.share({ files: [file], title: v.name, text: v.name + ' 품목' }).catch(function(){});
+        navigator.share({ files: [file], title: v.name, text: v.name + (phone ? ' (' + phone + ')' : '') }).catch(function(){});
       } else {
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
