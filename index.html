@@ -2088,9 +2088,18 @@
     var lines = items.map(function(it, i){
       var txt = clean(it.text);
       var qty = clean(it.qty);
-      return (i + 1) + '. ' + (qty ? (txt + ' ' + qty) : txt);
+      return circledNumber(i + 1) + ' ' + (qty ? (txt + ' ' + qty) : txt);
     });
     return ['■■■ 경성티에프 ■■■', '품목 ' + items.length + '개', v.name].concat(lines).join('\r\n');
+  }
+  // 문자(SMS)는 굵게/색 같은 서식이 아예 안 먹혀서(순수 텍스트만 됨), 숫자 자체를 동그라미
+  // 안에 넣은 유니코드 글자(①②③...)를 써서 눈에 띄게 함. 50번까지만 그 글자가 있어서,
+  // 그 이상은 그냥 "(51)"처럼 괄호로 표시함(품목 50개 넘는 업체는 거의 없음).
+  function circledNumber(n){
+    if (n >= 1 && n <= 20) return String.fromCodePoint(0x2460 + (n - 1));
+    if (n >= 21 && n <= 35) return String.fromCodePoint(0x3251 + (n - 21));
+    if (n >= 36 && n <= 50) return String.fromCodePoint(0x32b1 + (n - 36));
+    return '(' + n + ')';
   }
   function smsBtnHtml(phone, v){
     var body = encodeURIComponent(buildVendorItemsText(v));
