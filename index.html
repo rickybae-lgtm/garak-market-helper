@@ -1061,8 +1061,8 @@
         row.innerHTML =
           '<div class="name" style="flex:1; margin:0;">' + escapeHtml(v.name) +
             '<div class="status" style="font-weight:400; font-size:12px; color:var(--sub);">품목 ' + v.items.length + '개 · 픽킹 ' + done + '/' + v.items.length + '</div></div>' +
-          (phone ? callBtnHtml(phone) + smsBtnHtml(phone, v) : '') +
-          imgBtnHtml(group.groupName, v.name) +
+          (phone ? callBtnHtml(phone) : '') +
+          imgBtnHtml(group.groupName, v.name, '문자') +
           '<button class="btn sm accent" data-exview="' + escapeHtml(group.groupName) + '|' + escapeHtml(v.name) + '">품목보기</button>';
         listEl.appendChild(row);
       });
@@ -1322,8 +1322,8 @@
     var done = vendorDoneCount(v);
     var detailPhone = findPhoneForVendor(v.name);
     document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
-      (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) + smsBtnHtml(detailPhone, v) : '') +
-      ' ' + imgBtnHtml(groupName, v.name);
+      (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) : '') +
+      ' ' + imgBtnHtml(groupName, v.name, '문자');
     var summaryImgBtn = document.querySelector('#excelDetailSummary [data-imgshare]');
     if (summaryImgBtn){
       summaryImgBtn.addEventListener('click', function(){ shareVendorImage(v); });
@@ -2099,9 +2099,11 @@
     });
     return '■■■ 경성티에프 ■■■\n' + v.name + '\n' + lines.join('\n');
   }
-  function smsBtnHtml(phone, v){
+  // (글자 그대로 보내는 "sms:" 링크 버튼은 더 이상 안 씀 — 아래 "문자" 버튼이
+  // 캡쳐 이미지를 공유하는 쪽으로 대체함. 함수는 혹시 몰라 남겨둠.)
+  function smsLinkBtnHtml(phone, v){
     var body = encodeURIComponent(buildVendorItemsText(v));
-    return '<a class="call-btn" href="sms:' + escapeHtml(phone) + '?&body=' + body + '">문자</a>';
+    return '<a class="call-btn" href="sms:' + escapeHtml(phone) + '?&body=' + body + '">문자(글자)</a>';
   }
 
   // 품목이 많으면 문자 글자로 쭉 나열된 걸 읽기 힘들어해서, 캡쳐한 것처럼 보기 좋게 정리된
@@ -2186,8 +2188,8 @@
       }
     });
   }
-  function imgBtnHtml(groupName, vendorName){
-    return '<button class="call-btn" data-imgshare="' + escapeHtml(groupName) + '|' + escapeHtml(vendorName) + '">캡쳐</button>';
+  function imgBtnHtml(groupName, vendorName, label){
+    return '<button class="call-btn" data-imgshare="' + escapeHtml(groupName) + '|' + escapeHtml(vendorName) + '">' + escapeHtml(label || '캡쳐') + '</button>';
   }
   function findVendorByGroupAndName(groupName, vendorName){
     var group = (excelGroups || []).filter(function(g){ return g.groupName === groupName; })[0];
