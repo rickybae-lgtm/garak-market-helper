@@ -1062,6 +1062,7 @@
           '<div class="name" style="flex:1; margin:0;">' + escapeHtml(v.name) +
             '<div class="status" style="font-weight:400; font-size:12px; color:var(--sub);">품목 ' + v.items.length + '개 · 픽킹 ' + done + '/' + v.items.length + '</div></div>' +
           (phone ? callBtnHtml(phone) + smsBtnHtml(phone, v) : '') +
+          imgBtnHtml(group.groupName, v.name) +
           '<button class="btn sm accent" data-exview="' + escapeHtml(group.groupName) + '|' + escapeHtml(v.name) + '">품목보기</button>';
         listEl.appendChild(row);
       });
@@ -1071,6 +1072,13 @@
       b.addEventListener('click', function(){
         var parts = this.dataset.exview.split('|');
         openExcelDetail(parts[0], parts.slice(1).join('|'));
+      });
+    });
+    listEl.querySelectorAll('[data-imgshare]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var parts = this.dataset.imgshare.split('|');
+        var v = findVendorByGroupAndName(parts[0], parts.slice(1).join('|'));
+        if (v) shareVendorImage(v);
       });
     });
   }
@@ -1314,7 +1322,12 @@
     var done = vendorDoneCount(v);
     var detailPhone = findPhoneForVendor(v.name);
     document.getElementById('excelDetailSummary').innerHTML = '품목 ' + v.items.length + '개 · 픽킹 ' + done + ' / ' + v.items.length +
-      (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) + smsBtnHtml(detailPhone, v) : '');
+      (detailPhone ? ' · ' + escapeHtml(detailPhone) + ' ' + callBtnHtml(detailPhone) + smsBtnHtml(detailPhone, v) : '') +
+      ' ' + imgBtnHtml(groupName, v.name);
+    var summaryImgBtn = document.querySelector('#excelDetailSummary [data-imgshare]');
+    if (summaryImgBtn){
+      summaryImgBtn.addEventListener('click', function(){ shareVendorImage(v); });
+    }
 
     // "+"로 쪼개지는 글자가 있으면(품목칸이든 수량칸이든) 그 토큰 하나하나를 손가락으로 탭해서
     // 동그라미 칠 수 있게 함. 체크(픽킹)랑은 완전히 별개의 표시라서, 엑셀에서 품목칸/수량칸이
@@ -2089,6 +2102,96 @@
   function smsBtnHtml(phone, v){
     var body = encodeURIComponent(buildVendorItemsText(v));
     return '<a class="call-btn" href="sms:' + escapeHtml(phone) + '?&body=' + body + '">문자</a>';
+  }
+
+  // 품목이 많으면 문자 글자로 쭉 나열된 걸 읽기 힘들어해서, 캡쳐한 것처럼 보기 좋게 정리된
+  // 이미지로 만들어서 공유할 수 있게 함. 캔버스에 직접 그려서 PNG 이미지로 만든 다음,
+  // 휴대폰의 "공유하기" 창을 띄워서 문자(메시지) 앱을 고르면 이미지가 첨부된 채로 넘어감
+  // (번호까지 자동으로 채워주진 못함 — 이미지 첨부를 문자 앱 쪽에 넘겨주는 건 웹페이지에서
+  // 직접 할 수 있는 방법이 없고, 공유하기 창에서 사람이 받는 사람을 골라야 함).
+  // 공유하기 기능을 지원 안 하는 구형 브라우저에서는 이미지를 다운로드해주고, 문자 앱에
+  // 직접 사진 첨부로 넣어달라고 안내함.
+  function buildVendorImageBlob(v){
+    return new Promise(function(resolve){
+      var items = v.items || [];
+      var W = 720;
+      var padX = 28;
+      var lineH = 40;
+      var headerH = 150;
+      var footerH = 20;
+      var H = headerH + items.length * lineH + footerH;
+      var canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#111111';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('■■■ 경성티에프 ■■■', W / 2, 46);
+
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText(v.name, padX, 96);
+
+      ctx.strokeStyle = '#cccccc';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padX, headerH - 10);
+      ctx.lineTo(W - padX, headerH - 10);
+      ctx.stroke();
+
+      items.forEach(function(it, i){
+        var y = headerH + i * lineH + lineH / 2;
+        if (i % 2 === 1){
+          ctx.fillStyle = '#f4f4f4';
+          ctx.fillRect(0, headerH + i * lineH, W, lineH);
+        }
+        ctx.fillStyle = '#111111';
+        ctx.font = '22px sans-serif';
+        ctx.textAlign = 'left';
+        var txt = clean(it.text);
+        var maxTxtW = W - padX * 2 - 160;
+        while (ctx.measureText(txt).width > maxTxtW && txt.length > 1){
+          txt = txt.slice(0, -1);
+        }
+        if (txt !== clean(it.text)) txt += '…';
+        ctx.fillText(txt, padX, y);
+        ctx.font = 'bold 22px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(clean(it.qty), W - padX, y);
+      });
+
+      canvas.toBlob(function(blob){ resolve(blob); }, 'image/png');
+    });
+  }
+  function shareVendorImage(v){
+    buildVendorImageBlob(v).then(function(blob){
+      if (!blob){ alert('이미지를 만들지 못했어요.'); return; }
+      var fileName = v.name + '_품목.png';
+      var file = new File([blob], fileName, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })){
+        navigator.share({ files: [file], title: v.name, text: v.name + ' 품목' }).catch(function(){});
+      } else {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+        alert('이 브라우저는 바로 공유가 안 돼서 이미지를 다운로드했어요. 문자 앱에서 사진 첨부로 직접 넣어주세요.');
+      }
+    });
+  }
+  function imgBtnHtml(groupName, vendorName){
+    return '<button class="call-btn" data-imgshare="' + escapeHtml(groupName) + '|' + escapeHtml(vendorName) + '">캡쳐</button>';
+  }
+  function findVendorByGroupAndName(groupName, vendorName){
+    var group = (excelGroups || []).filter(function(g){ return g.groupName === groupName; })[0];
+    return group && group.vendors.filter(function(x){ return x.name === vendorName; })[0];
   }
 
   var addVendorInput = document.getElementById('addVendorInput');
